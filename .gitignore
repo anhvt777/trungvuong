@@ -1,0 +1,7 @@
+.env
+.dev.vars
+.wrangler/
+*.sqlite
+*PARENT_DRAFT*.json
+*students*.csv
+*payments*.csv
