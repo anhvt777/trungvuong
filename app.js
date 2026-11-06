@@ -1317,6 +1317,7 @@ async function qrFileRows(validateOnly=false){
       e.student.className||'',e.student.externalCode||e.student.code||'',qrFileDate(e.student.birthDate),
       e.feeName||'',e.student.name||''
     ]);
+    if(e.paid&&e.item.qrAccountNumber&&slug(e.item.qrAccountNumber)!==slug(accountNumber))throw new Error('Khoản '+e.feeName+' của '+e.student.name+' đã ghi nhận thanh toán; không thể đổi tài khoản định danh.');
     if(slug(e.item.qrAccountNumber)!==slug(accountNumber)||(tvIsMonthlyFee(e.feeShort,e.feeName)&&!e.item.periodId)){
       if(!changes.has(e.student.code))changes.set(e.student.code,new Map());
       changes.get(e.student.code).set(e.item.id,{accountNumber,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
