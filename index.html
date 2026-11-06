@@ -94,6 +94,7 @@
               <label class="qr-field"><span>Số tiền / học sinh</span><input id="feeAmount" inputmode="numeric" placeholder="Ví dụ: 150000"></label>
               <label class="qr-field"><span>Nhóm khoản</span><select id="feeCategory"><option value="service">Khoản thu / dịch vụ khác</option><option value="insurance">Bảo hiểm y tế (BHYT)</option><option value="mandatory">Bảo hiểm thân thể (BHTT)</option><option value="other">Khoản khác</option></select></label>
               <label class="qr-field"><span>Tiền tố mã KH</span><input id="feePrefix" maxlength="8" value="TV" placeholder="TV"></label>
+              <label class="qr-field"><span>Kỳ thu (bán trú bắt buộc YYYY-MM)</span><input id="feePeriod" maxlength="16" placeholder="2026-11 hoặc 2026"></label>
               <label class="qr-field"><span>Phạm vi phân giao</span><select id="feeScope"><option value="all">Toàn trường</option><option value="grade">Theo khối</option><option value="class">Theo lớp</option><option value="student">Chọn học sinh</option></select></label>
             </div>
             <div class="fee-target-block">
@@ -435,7 +436,7 @@
   <div class="receipt-print-root" id="receiptPrintRoot" aria-hidden="true"></div>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
-  <script src="app.js?v=tv-month-20261106"></script>
+  <script src="app.js?v=tv-month-20261106b"></script>
   <script src="insurance.js"></script>
 </body>
 </html>
