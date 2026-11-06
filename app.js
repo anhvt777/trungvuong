@@ -1017,10 +1017,12 @@ function defaultFeeShortCode(category,code=''){
 function updateFeePreview(students){
   const prefix=$('#feePrefix')?.value||'TV',code=$('#feeCode')?.value||'KHOAN',category=$('#feeCategory')?.value||'service',shortCode=feeSafeCode($('#feeShortCode')?.value||defaultFeeShortCode(category,code),2),sample=students[0];
   $('#feeCodePreview').textContent=`${feeSafeCode(prefix)||'TV'} + Mã học sinh + ${shortCode||'XX'}`;
-  $('#feeCodePreviewExample').textContent=sample?`Ví dụ: ${buildPaymentCode(prefix,sample.classStudentCode||sample.code,shortCode)} · ${sample.name}`:'Ví dụ sẽ hiển thị sau khi có danh sách học sinh.';
+  let displayCode=sample?buildPaymentCode(prefix,sample.classStudentCode||sample.code,shortCode):'';
+  if(displayCode&&tvIsMonthlyFee(shortCode,$('#feeName')?.value)){try{displayCode=tvMonthlyCustomerCode(displayCode,$('#feePeriod')?.value||'');}catch(e){displayCode='Nhập kỳ YYYY-MM cho bán trú';}}
+  $('#feeCodePreviewExample').textContent=sample?`Ví dụ: ${displayCode} · ${sample.name}`:'Ví dụ sẽ hiển thị sau khi có danh sách học sinh.';
 }
 function resetFeeForm(students=[]){
-  $('#feeEditingId').value='';$('#feeBuilderTitle').textContent='Tạo khoản thu';$('#feeName').value='';$('#feeCode').value='';$('#feeShortCode').value='DV';$('#feeAmount').value='';$('#feeCategory').value='service';$('#feePrefix').value='TV';$('#feeScope').value='all';$('#cancelFeeEdit').hidden=true;$('#saveFeeAssignment').textContent='Tạo & phân giao';populateFeeTargets(students);updateFeePreview(students);
+  $('#feeEditingId').value='';$('#feeBuilderTitle').textContent='Tạo khoản thu';$('#feeName').value='';$('#feeCode').value='';$('#feeShortCode').value='DV';$('#feeAmount').value='';$('#feePeriod').value='';$('#feeCategory').value='service';$('#feePrefix').value='TV';$('#feeScope').value='all';$('#cancelFeeEdit').hidden=true;$('#saveFeeAssignment').textContent='Tạo & phân giao';populateFeeTargets(students);updateFeePreview(students);
 }
 function feeItemAssignmentCount(students,id){return students.reduce((n,s)=>n+studentDueItems(s).filter(x=>x.catalogId===id).length,0);}
 function renderFeeCatalog(catalog,students){
@@ -1028,7 +1030,7 @@ function renderFeeCatalog(catalog,students){
   $('#feeCatalogList').innerHTML=catalog.length?catalog.map(f=>{
     const count=feeItemAssignmentCount(students,f.id);
     const scope=f.lastScope==='all'?'Toàn trường':f.lastScope==='grade'?'Theo khối':f.lastScope==='class'?'Theo lớp':'Theo học sinh';
-    return `<article class="fee-catalog-item"><div><span class="category-badge ${f.category==='service'?'service':''}">${escapeHTML(f.code)} / ${escapeHTML(f.shortCode||defaultFeeShortCode(f.category,f.code))}</span><h3>${escapeHTML(f.name)}</h3><p>${money(f.amount)} · ${scope} · ${count} học sinh</p></div><div class="fee-catalog-actions"><button class="button button-outline button-small" data-fee-edit="${f.id}">Sửa</button><button class="button button-danger button-small" data-fee-delete="${f.id}">Xóa</button></div></article>`;
+    return `<article class="fee-catalog-item"><div><span class="category-badge ${f.category==='service'?'service':''}">${escapeHTML(f.code)} / ${escapeHTML(f.shortCode||defaultFeeShortCode(f.category,f.code))}</span><h3>${escapeHTML(f.name)}</h3><p>${money(f.amount)} · ${escapeHTML(f.periodId||'Chưa ghi kỳ')} · ${scope} · ${count} học sinh</p></div><div class="fee-catalog-actions"><button class="button button-outline button-small" data-fee-edit="${f.id}">Sửa</button><button class="button button-danger button-small" data-fee-delete="${f.id}">Xóa</button></div></article>`;
   }).join(''):'<div class="empty-inline">Chưa có khoản thu. Tạo khoản đầu tiên ở biểu mẫu bên trái.</div>';
 }
 function bidvStudentParts(student){
@@ -1120,7 +1122,10 @@ function updateBidvCustomerPreview(students,catalog){
   const options=bidvFeeOptions(students,catalog),fee=options.find(f=>f.optionId===$('#bidvExportFee')?.value)||options[0];
   const prefix=$('#bidvCustomerPrefix')?.value||'',period=$('#bidvBillPeriod')?.value||String(new Date().getFullYear()),template=$('#bidvCustomerTemplate')?.value||'{YY}{CLASS}{SEQ}{FEE}';
   const feeToken=fee?.shortCode||defaultFeeShortCode(fee?.category,fee?.code);
-  const code=sample&&fee?bidvCustomerCodeFromTemplate(template,sample,feeToken,prefix,period):'—';
+  let code='—';
+  if(sample&&fee){try{code=bidvCustomerCodeFromTemplate(template,sample,feeToken,prefix,period);
+    if(tvIsMonthlyFee(feeToken,fee.name))code=tvMonthlyCustomerCode(code,period);
+  }catch(e){code=e.message;}}
   if($('#bidvCustomerPreview'))$('#bidvCustomerPreview').textContent=code;
   if($('#bidvCustomerPreviewText'))$('#bidvCustomerPreviewText').textContent=sample&&fee?`${sample.name} · ${sample.className} · ${fee.name}`:'Chọn khoản thu để xem mã mẫu.';
 }
@@ -1360,11 +1365,12 @@ async function renderFeeSetup(students){
 }
 async function saveFeeAssignment(){
   const students=await all('students');if(!students.length)return toast('Hãy nhập danh sách học sinh trước khi tạo khoản thu.',true);
-  const id=$('#feeEditingId').value||crypto.randomUUID(),name=$('#feeName').value.trim(),code=feeSafeCode($('#feeCode').value,8),amount=parseAmount($('#feeAmount').value),category=$('#feeCategory').value,shortCode=feeSafeCode($('#feeShortCode').value||defaultFeeShortCode(category,code),2),prefix=feeSafeCode($('#feePrefix').value||'HG',6),scope=$('#feeScope').value,targets=selectedValues($('#feeTargets'));
+  const id=$('#feeEditingId').value||crypto.randomUUID(),name=$('#feeName').value.trim(),code=feeSafeCode($('#feeCode').value,8),amount=parseAmount($('#feeAmount').value),category=$('#feeCategory').value,shortCode=feeSafeCode($('#feeShortCode').value||defaultFeeShortCode(category,code),2),prefix=feeSafeCode($('#feePrefix').value||'TV',6),scope=$('#feeScope').value,targets=selectedValues($('#feeTargets')),periodRaw=String($('#feePeriod')?.value||'').trim(),isMonthly=tvIsMonthlyFee(shortCode,name),periodId=isMonthly?tvMonthFromPeriod(periodRaw).periodId:(periodRaw||'');
   if(!name||!code||shortCode.length!==2||amount<=0)return toast('Hãy nhập tên khoản, mã khoản, ký hiệu 2 ký tự và số tiền hợp lệ.',true);
   if(scope!=='all'&&!targets.length)return toast('Hãy chọn ít nhất một đối tượng áp dụng.',true);
   const catalog=await getFeeCatalog();const duplicate=catalog.find(f=>f.id!==id&&feeSafeCode(f.code)===code);if(duplicate)return toast('Mã khoản đã tồn tại. Hãy dùng mã khác.',true);
   const existingFee=catalog.find(f=>f.id===id);
+  if(existingFee&&existingFee.periodId&&periodId!==existingFee.periodId)throw new Error('Không được thay đổi kỳ thu đã tạo. Hãy tạo khoản mới cho kỳ mới.');
   if(existingFee){const stored=await all('transactions'),tx=reconcileTransactions(students,stored),assigned=new Set(students.flatMap(s=>studentDueItems(s).filter(x=>x.catalogId===id).map(x=>`${s.code}|${x.id}`)));if(tx.some(t=>t.paymentStatus==='valid'&&transactionPaidKeys(t).some(key=>assigned.has(key))))return toast('Khoản này đã có giao dịch thu. Để bảo toàn đối soát, không thể sửa hoặc phân giao lại; hãy tạo khoản mới.',true);}
   const chosen=feeTargetStudents(students,scope,targets);if(!chosen.length)return toast('Không có học sinh nào trong phạm vi đã chọn.',true);
   const codes=new Set();for(const s of students)for(const item of studentDueItems(s))if(item.paymentCode)codes.add(slug(item.paymentCode));
@@ -1372,21 +1378,23 @@ async function saveFeeAssignment(){
   const updated=students.map(s=>{
     const items=studentDueItems(s).filter(item=>item.catalogId!==id);
     if(chosenSet.has(s.code)){
-      const paymentCode=buildPaymentCode(prefix,s.classStudentCode||s.code,shortCode),paymentKey=slug(paymentCode);
+      let paymentCode=buildPaymentCode(prefix,s.classStudentCode||s.code,shortCode);
+      if(isMonthly)paymentCode=tvMonthlyCustomerCode(paymentCode,periodId);
+      const paymentKey=slug(paymentCode);
       if(!paymentCode||[...codes].some(existing=>existing===paymentKey&&!studentDueItems(s).some(x=>x.catalogId===id&&slug(x.paymentCode)===paymentKey)))throw new Error(`Mã khách hàng bị trùng: ${paymentCode}. Hãy đổi tiền tố hoặc mã khoản.`);
-      items.push({id:`catalog:${id}:${slug(s.code)}`,catalogId:id,paymentCode,category,name,amount,feeCode:code,shortCode,createdAt:now});
+      items.push({id:`catalog:${id}:${slug(s.code)}`,catalogId:id,paymentCode,category,name,amount,feeCode:code,shortCode,periodId,period:periodId,periodType:isMonthly?'month':'year',createdAt:now});
     }
     const due=items.reduce((sum,x)=>sum+num(x.amount),0),dueByCategory=items.reduce((o,x)=>(o[x.category]=(o[x.category]||0)+num(x.amount),o),{insurance:0,mandatory:0,service:0,other:0});
     return {...s,due,dueItems:items,dueByCategory,hasFeeBreakdown:true,updatedAt:now};
   });
   await putMany('students',updated);
-  const entry={id,name,code,shortCode,amount,category,prefix,lastScope:scope,lastTargets:scope==='all'?[]:targets,updatedAt:now,createdAt:catalog.find(f=>f.id===id)?.createdAt||now};
+  const entry={id,name,code,shortCode,amount,category,prefix,periodId,periodType:isMonthly?'month':'year',lastScope:scope,lastTargets:scope==='all'?[]:targets,updatedAt:now,createdAt:catalog.find(f=>f.id===id)?.createdAt||now};
   const next=[...catalog.filter(f=>f.id!==id),entry];await request('meta','put',feeCatalogRecord(next));
   await refresh();resetFeeForm(await all('students'));toast(`Đã phân giao “${name}” cho ${chosen.length} học sinh.`);
 }
 async function editFee(id){
   const [catalog,students]=await Promise.all([getFeeCatalog(),all('students')]);const f=catalog.find(x=>x.id===id);if(!f)return;
-  $('#feeEditingId').value=f.id;$('#feeBuilderTitle').textContent='Cập nhật khoản thu';$('#feeName').value=f.name;$('#feeCode').value=f.code;$('#feeShortCode').value=f.shortCode||defaultFeeShortCode(f.category,f.code);$('#feeAmount').value=f.amount;$('#feeCategory').value=f.category;$('#feePrefix').value=f.prefix||'HG';$('#feeScope').value=f.lastScope||'all';populateFeeTargets(students);
+  $('#feeEditingId').value=f.id;$('#feeBuilderTitle').textContent='Cập nhật khoản thu';$('#feeName').value=f.name;$('#feeCode').value=f.code;$('#feeShortCode').value=f.shortCode||defaultFeeShortCode(f.category,f.code);$('#feeAmount').value=f.amount;$('#feeCategory').value=f.category;$('#feePrefix').value=f.prefix||'TV';$('#feePeriod').value=f.periodId||'';$('#feeScope').value=f.lastScope||'all';populateFeeTargets(students);
   const targetSet=new Set(f.lastTargets||[]);[...$('#feeTargets').options].forEach(o=>o.selected=targetSet.has(o.value));$('#cancelFeeEdit').hidden=false;$('#saveFeeAssignment').textContent='Lưu & phân giao lại';updateFeePreview(students);setPage('fee-setup');
 }
 async function deleteFee(id){
@@ -2504,7 +2512,7 @@ function wire() {
   $('#studentProfileClose').onclick=closeStudentProfile;$('#studentProfileBackdrop').addEventListener('click',e=>{if(e.target.id==='studentProfileBackdrop')closeStudentProfile();});
   $('#feeScope').addEventListener('change',async()=>populateFeeTargets(await all('students')));
   $('#feeTargets').addEventListener('change',async()=>{const students=await all('students');const chosen=feeTargetStudents(students,$('#feeScope').value,selectedValues($('#feeTargets')));$('#feeTargetSummary').textContent=`${chosen.length} học sinh được chọn`;});
-  ['feePrefix','feeCode','feeShortCode'].forEach(id=>$(`#${id}`).addEventListener('input',async()=>updateFeePreview(await all('students'))));
+  ['feePrefix','feeCode','feeShortCode','feePeriod','feeName'].forEach(id=>$(`#${id}`).addEventListener('input',async()=>updateFeePreview(await all('students'))));
   $('#feeCategory').addEventListener('change',async()=>{const code=defaultFeeShortCode($('#feeCategory').value,$('#feeCode').value);$('#feeShortCode').value=code;updateFeePreview(await all('students'));});
   $('#bidvExportScope').addEventListener('change',async()=>{const [students,catalog]=await Promise.all([all('students'),getFeeCatalog()]);populateBidvExportControls(students,catalog);});
   ['bidvExportFee','bidvExportTarget'].forEach(id=>$(`#${id}`).addEventListener('change',async()=>{const [students,catalog]=await Promise.all([all('students'),getFeeCatalog()]);updateBidvCustomerPreview(students,catalog);}));
