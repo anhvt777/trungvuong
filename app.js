@@ -1038,6 +1038,33 @@ function bidvStudentParts(student){
   const seq=m?.[2]||'00';
   return {classToken:m?.[1]||classToken,seq};
 }
+
+function tvMonthFromPeriod(raw){
+  const p=String(raw||'').trim();
+  let year,month;
+  let m=p.match(/^(20\d{2})[-\/]((?:0?[1-9])|(?:1[0-2]))$/);
+  if(m){year=Number(m[1]);month=Number(m[2]);}
+  else {m=p.match(/^((?:0?[1-9])|(?:1[0-2]))[-\/](20\d{2})$/);if(m){year=Number(m[2]);month=Number(m[1]);}}
+  if(!year||!month)throw new Error('Khoản thu theo tháng: nhập kỳ dạng YYYY-MM (ví dụ 2026-11) hoặc MM/YYYY (11/2026).');
+  return {periodId:year+'-'+String(month).padStart(2,'0'),month:String(month).padStart(2,'0'),year};
+}
+function tvIsMonthlyFee(feeCode,name=''){
+  const code=feeSafeCode(feeCode,10),label=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+  return code==='BT'||code==='BANTRU'||label.includes('BAN TRU');
+}
+function tvMonthlyCustomerCode(code,period){
+  const suffix=tvMonthFromPeriod(period).month;
+  const base=feeSafeCode(code,40);
+  if(!base||base.length+2>40)throw new Error('Mã định danh vượt giới hạn khi thêm hai số tháng.');
+  return base+suffix;
+}
+function tvCheckItemPeriod(item,period){
+  const existing=String(item?.periodId||item?.period||'').trim();
+  if(!existing)return;
+  const next=tvMonthFromPeriod(period).periodId;
+  if(tvMonthFromPeriod(existing).periodId!==next)throw new Error('Khoản bán trú '+(item.name||'')+' đã gắn kỳ '+existing+'. Hãy tạo một khoản thu mới cho tháng '+next+'; không ghi đè kỳ cũ.');
+}
+
 function bidvCustomerCodeFromTemplate(template,student,feeCode,prefix,period){
   const {classToken,seq}=bidvStudentParts(student);
   const yearMatch=String(period||'').match(/(20\d{2})/);
@@ -1117,7 +1144,9 @@ async function bidvExportRows(validateOnly=false){
     const paymentKey=`${student.code}|${item.id}`;
     if(onlyUnpaid&&paidKeys.has(paymentKey))continue;
     const feeToken=fee.shortCode||defaultFeeShortCode(fee.category,fee.code);
-    const customerId=bidvCustomerCodeFromTemplate(template,student,feeToken,prefix,period);
+    if(tvIsMonthlyFee(feeToken,fee.name))tvCheckItemPeriod(item,period);
+    let customerId=bidvCustomerCodeFromTemplate(template,student,feeToken,prefix,period);
+    if(tvIsMonthlyFee(feeToken,fee.name))customerId=tvMonthlyCustomerCode(customerId,period);
     if(!customerId)throw new Error(`Không tạo được Mã khách hàng cho ${student.name}.`);
     if(!/^[A-Z0-9]+$/.test(customerId))throw new Error(`Mã khách hàng ${customerId} có ký tự không hợp lệ.`);
     if(seen.has(customerId))throw new Error(`Trùng Mã khách hàng: ${customerId}. Hãy đổi cấu trúc mã.`);
@@ -1130,7 +1159,7 @@ async function bidvExportRows(validateOnly=false){
       bidvName(student.externalCode||'',120),bidvName(student.code||'',120),
       bidvName(student.classStudentCode||'',120),bidvName(feeToken||'',120),bidvName(student.note||student.studentType||'',120)
     ]);
-    if(slug(item.paymentCode)!==slug(customerId))changes.set(student.code,customerId);
+    if(slug(item.paymentCode)!==slug(customerId)||(tvIsMonthlyFee(feeToken,fee.name)&&!item.periodId))changes.set(student.code,customerId);
   }
   if(!rows.length)throw new Error('Không có món thu phù hợp để xuất.');
   if(validateOnly)return {rows,fee,changes};
@@ -1143,7 +1172,7 @@ async function bidvExportRows(validateOnly=false){
         const nextCode=changes.get(s.code),aliases=new Set(item.paymentCodeAliases||[]);
         if(item.paymentCode&&slug(item.paymentCode)!==slug(nextCode))aliases.add(item.paymentCode);
         for(const alias of [...aliases])if(slug(alias)===slug(nextCode))aliases.delete(alias);
-        return {...item,paymentCode:nextCode,paymentCodeAliases:[...aliases],feeCode:item.feeCode||fee.code,shortCode:item.shortCode||fee.shortCode||defaultFeeShortCode(fee.category,fee.code)};
+        return {...item,paymentCode:nextCode,paymentCodeAliases:[...aliases],feeCode:item.feeCode||fee.code,shortCode:item.shortCode||fee.shortCode||defaultFeeShortCode(fee.category,fee.code),...(tvIsMonthlyFee(fee.shortCode,fee.name)?{periodId:tvMonthFromPeriod(period).periodId,period:tvMonthFromPeriod(period).periodId,periodType:'month'}:{})};
       });
       return {...s,dueItems,updatedAt:new Date().toISOString()};
     });
@@ -1187,7 +1216,9 @@ function qrFeeRemarkName(name){
 function qrCustomerCode(student,feeShort,period){
   const bidvPrefix=$('#bidvCustomerPrefix')?.value||'';
   const template=$('#bidvCustomerTemplate')?.value||'{YY}{CLASS}{SEQ}{FEE}';
-  return bidvCustomerCodeFromTemplate(template,student,feeShort,bidvPrefix,period);
+  let code=bidvCustomerCodeFromTemplate(template,student,feeShort,bidvPrefix,period);
+  if(tvIsMonthlyFee(feeShort))code=tvMonthlyCustomerCode(code,period);
+  return code;
 }
 function qrFileDate(value){
   const s=String(value||'').trim();if(!s)return '';
@@ -1247,7 +1278,10 @@ async function updateQrFilePreview(students,catalog,transactions=[]){
   const entries=qrFileFilteredEntries(students,catalog,transactions),sample=entries[0];
   if(!sample){$('#qrFileAccountPreview').textContent='—';$('#qrFileRemarkPreview').textContent='Không có món thu phù hợp.';return;}
   const prefix=$('#qrFilePrefix')?.value||'',period=$('#qrFilePeriod')?.value||'';
-  const account=qrFileAccountNumber(prefix,sample.student,sample.item,period,sample.feeShort);
+  let account;
+  try{if(tvIsMonthlyFee(sample.feeShort,sample.feeName))tvCheckItemPeriod(sample.item,period);
+    account=qrFileAccountNumber(prefix,sample.student,sample.item,period,sample.feeShort);}
+  catch(e){$('#qrFileAccountPreview').textContent='Kỳ thu chưa hợp lệ';$('#qrFileRemarkPreview').textContent=e.message;return;}
   const accountName=qrFileText(`${sample.student.name} ${sample.student.className}`,80);
   const feeName=qrFeeRemarkName(sample.feeName);
   const remark=qrFileText(`${accountName} NOP ${feeName} ${period}`,140);
@@ -1263,6 +1297,7 @@ async function qrFileRows(validateOnly=false){
   if(!period)throw new Error('Hãy nhập Kỳ thu.');
   const seen=new Set(),rows=[],changes=new Map();
   for(const e of entries){
+    if(tvIsMonthlyFee(e.feeShort,e.feeName))tvCheckItemPeriod(e.item,period);
     const accountNumber=qrFileAccountNumber(prefix,e.student,e.item,period,e.feeShort);
     if(!accountNumber)throw new Error(`Không tạo được AccountNumber cho ${e.student.name}.`);
     if(!/^[A-Z0-9]+$/.test(accountNumber))throw new Error(`AccountNumber không hợp lệ: ${accountNumber}`);
@@ -1277,16 +1312,19 @@ async function qrFileRows(validateOnly=false){
       e.student.className||'',e.student.externalCode||e.student.code||'',qrFileDate(e.student.birthDate),
       e.feeName||'',e.student.name||''
     ]);
-    if(slug(e.item.qrAccountNumber)!==slug(accountNumber)){
+    if(slug(e.item.qrAccountNumber)!==slug(accountNumber)||(tvIsMonthlyFee(e.feeShort,e.feeName)&&!e.item.periodId)){
       if(!changes.has(e.student.code))changes.set(e.student.code,new Map());
-      changes.get(e.student.code).set(e.item.id,accountNumber);
+      changes.get(e.student.code).set(e.item.id,{accountNumber,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
     }
   }
   if(validateOnly)return {rows,changes};
   if(changes.size){
     const updated=students.map(s=>{
       const m=changes.get(s.code);if(!m)return s;
-      const dueItems=studentDueItems(s).map(item=>m.has(item.id)?{...item,qrAccountNumber:m.get(item.id)}:item);
+      const dueItems=studentDueItems(s).map(item=>{if(!m.has(item.id))return item;
+        const record=m.get(item.id);
+        return {...item,qrAccountNumber:record.accountNumber,periodId:record.periodId||item.periodId||'',period:record.periodId||item.period||'',periodType:record.periodId?'month':(item.periodType||'')};
+      });
       return {...s,dueItems,updatedAt:new Date().toISOString()};
     });
     await putMany('students',updated);
@@ -2550,10 +2588,10 @@ async function exportParentPreview(){
     charges:studentDueItems(s).filter(i=>!i.legacy&&i.amount>0).map(i=>{
       const paid=paidKeys.has(`${s.code}|${i.id}`);
       const amount=Number(i.amount)||0;
-      const paymentRef=String(i.paymentCode||'');
+      const paymentRef=String(i.qrAccountNumber||i.paymentCode||'');
       const qrReady=!paid&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
       const payload=qrReady?buildVietQrPayload(qrConfig,amount,paymentRef):null;
-      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.period||''),due:amount,paid:paid?amount:0,remaining:paid?0:amount,payment_reference:paymentRef,qr_payload:payload};
+      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid:paid?amount:0,remaining:paid?0:amount,payment_reference:paymentRef,qr_payload:payload};
     })
   }));
   const draft={schema:'school-parent-sync-draft/1',school_id:'TRUNGVUONG',school_name:'TRƯỜNG TRƯNG VƯƠNG',generated_at:new Date().toISOString(),status:'OFFLINE_DRAFT_NOT_APPROVED',students:records};
