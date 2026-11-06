@@ -120,11 +120,11 @@
             <label class="qr-field"><span>Khoản thu cần xuất</span><select id="bidvExportFee"><option value="">— Chọn khoản thu —</option></select></label>
             <label class="qr-field"><span>Phạm vi</span><select id="bidvExportScope"><option value="all">Toàn bộ học sinh được phân giao</option><option value="grade">Theo khối</option><option value="class">Theo lớp</option></select></label>
             <label class="qr-field"><span>Đối tượng</span><select id="bidvExportTarget"><option value="all">Tất cả</option></select></label>
-            <label class="qr-field"><span>Kỳ hóa đơn</span><input id="bidvBillPeriod" maxlength="20" value="2026" placeholder="Ví dụ: 2026"></label>
+            <label class="qr-field"><span>Kỳ hóa đơn</span><input id="bidvBillPeriod" maxlength="20" value="2026-11" placeholder="Bán trú: 2026-11; bảo hiểm: 2026"></label>
             <label class="qr-field"><span>Tiền tố bổ sung (không bắt buộc)</span><input id="bidvCustomerPrefix" maxlength="8" value="" placeholder="Để trống nếu không cần"></label>
             <label class="qr-field"><span>Cấu trúc Mã khách hàng</span><input id="bidvCustomerTemplate" maxlength="80" value="{YY}{CLASS}{SEQ}{FEE}" placeholder="{YY}{CLASS}{SEQ}{FEE}"></label>
           </div>
-          <div class="mapping-note"><span class="note-icon">i</span><div><strong>Các biến có thể dùng:</strong><p><code>{PREFIX}</code> tiền tố tùy chọn · <code>{YY}</code>/<code>{YYYY}</code> năm · <code>{CLASS}</code> lớp · <code>{SEQ}</code> số thứ tự 01–99 · <code>{HS}</code> mã HS theo lớp · <code>{BASE}</code> mã HS gốc · <code>{CD}</code> Mã số CĐ · <code>{FEE}</code> ký hiệu khoản 2 ký tự. File BIDV dùng tài khoản định danh nên mã xuất ra chỉ gồm chữ không dấu và số.</p></div></div>
+          <div class="mapping-note"><span class="note-icon">i</span><div><strong>Các biến có thể dùng:</strong><p><code>{PREFIX}</code> tiền tố tùy chọn · <code>{YY}</code>/<code>{YYYY}</code> năm · <code>{CLASS}</code> lớp · <code>{SEQ}</code> số thứ tự 01–99 · <code>{HS}</code> mã HS theo lớp · <code>{BASE}</code> mã HS gốc · <code>{CD}</code> Mã số CĐ · <code>{FEE}</code> ký hiệu khoản 2 ký tự. Với bán trú (BT), hệ thống tự thêm đúng hai số tháng ở cuối mã (ví dụ BT11) và bắt buộc kỳ YYYY-MM; bảo hiểm theo năm giữ mã cũ. File BIDV chỉ gồm chữ không dấu và số.</p></div></div>
           <div class="fee-code-preview"><span>Xem trước Mã khách hàng</span><strong id="bidvCustomerPreview">267C201TT</strong><small id="bidvCustomerPreviewText">Khuyến nghị: năm 2 số + lớp + STT 2 số + ký hiệu khoản 2 ký tự. Không cần TV.</small></div>
           <label class="check-row"><input type="checkbox" id="bidvOnlyUnpaid" checked><span>Chỉ xuất các khoản chưa thu</span></label>
           <div class="fee-builder-actions"><button class="button button-outline" id="bidvValidateExport">Kiểm tra mã</button><button class="button button-primary" id="bidvExportXlsx">↓ Xuất XLSX BIDV</button></div>
@@ -132,13 +132,13 @@
         </article>
 
         <article class="panel bidv-export-panel qr-file-export-panel">
-          <div class="panel-header"><div><span class="eyebrow">FILE TẠO QR ĐỊNH DANH</span><h2>Xuất bảng kê tạo QR</h2><p>Xuất đúng 11 cột theo file mẫu Test 6E.xlsx. BIDV và BankBin 970418 được tự điền cố định; người dùng chỉ chọn phạm vi và món thu cần xuất.</p></div><span class="mini-tag">XLSX · QR</span></div>
+          <div class="panel-header"><div><span class="eyebrow">FILE TẠO QR ĐỊNH DANH</span><h2>Xuất bảng kê tạo QR</h2><p>Xuất đúng 11 cột theo mẫu. Bán trú tự thêm 2 chữ số tháng ở cuối AccountNumber; nhập kỳ YYYY-MM (ví dụ 2026-11) và tạo khoản mới cho mỗi tháng. BIDV và BankBin 970418 được tự điền cố định; người dùng chỉ chọn phạm vi và món thu cần xuất.</p></div><span class="mini-tag">XLSX · QR</span></div>
           <div class="fee-form-grid">
             <label class="qr-field"><span>Phạm vi xuất</span><select id="qrFileScope"><option value="all">Toàn bộ danh sách trường</option><option value="class">Theo lớp</option><option value="student">Theo học sinh</option></select></label>
             <label class="qr-field"><span>Đối tượng</span><select id="qrFileTarget"><option value="all">Tất cả</option></select></label>
             <label class="qr-field"><span>Món thu</span><select id="qrFileFee"><option value="all">Tất cả món thu</option></select></label>
             <label class="qr-field"><span>Mã đầu định danh</span><input id="qrFilePrefix" maxlength="30" value="V6" placeholder="Ví dụ: V6"></label>
-            <label class="qr-field"><span>Kỳ thu</span><input id="qrFilePeriod" maxlength="30" value="2026" placeholder="Ví dụ: 2026 hoặc HK1 2026"></label>
+            <label class="qr-field"><span>Kỳ thu</span><input id="qrFilePeriod" maxlength="30" value="2026-11" placeholder="Bán trú: 2026-11; bảo hiểm: 2026"></label>
             <label class="qr-field"><span>Cấu trúc mã QR</span><input value="Mã đầu định danh + Mã khách hàng BIDV" readonly></label>
           </div>
           <div class="mapping-note"><span class="note-icon">i</span><div><strong>Cấu trúc file QR:</strong><p><code>AccountNumber</code> = Mã đầu định danh + đúng Mã khách hàng BIDV của cùng học sinh/món thu (cùng tiền tố, năm 2 số, lớp, STT và ký hiệu khoản). <code>AccountName</code> = Họ tên học sinh + lớp. <code>Remark</code> = AccountName + NOP + Tên khoản thu + kỳ thu; tự loại mã BHYT/BHTT/TT/YT bị lặp.</p></div></div>
