@@ -17,7 +17,7 @@ async function reviewedQrApi(req,env){
  if(x.bank_bin!=='970418'||!/^[A-Za-z0-9]{4,34}$/.test(x.account_number)||!/^[A-Za-z0-9 _.-]{1,95}$/.test(x.remark)||!Number.isSafeInteger(x.amount)||x.amount<=0||x.amount>10000000)return reply({error:'Invalid BIDV data'},422);
  if(!/^[A-Za-z0-9+/=]+$/.test(x.qr_png_base64)||x.qr_png_base64.length<100||x.qr_png_base64.length>=175000||!x.qr_png_base64.startsWith('iVBORw0KGgo'))return reply({error:'Invalid QR PNG'},422);
  let png;try{png=atob(x.qr_png_base64)}catch{return reply({error:'Malformed QR PNG'},422)}
- if(png.length<200||png.length>140000||png.slice(0,8)!=='\\x89PNG\\r\\n\\x1a\\n'||png.slice(12,16)!=='IHDR')return reply({error:'Not a valid PNG signature'},422);
+ if(png.length<200||png.length>140000||png.slice(0,8)!=='\x89PNG\r\n\x1a\n'||png.slice(12,16)!=='IHDR')return reply({error:'Not a valid PNG signature'},422);
  const dimension=i=>((png.charCodeAt(i)*16777216)+(png.charCodeAt(i+1)*65536)+(png.charCodeAt(i+2)*256)+png.charCodeAt(i+3));
  const w=dimension(16),h=dimension(20);
  if(w<180||w>1200||h<180||h>1200)return reply({error:'Invalid QR image dimensions'},422);
