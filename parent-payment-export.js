@@ -66,6 +66,8 @@
         if(!map.has(key))map.set(key,[]);
         map.get(key).push(x);
       }
+      const academicYear=plain(document.querySelector('#parentAcademicYear')?.value);
+      if(academicYear!=='2026-2027')throw Error('Cần xác nhận năm học cho khoản bảo hiểm.');
       const [students,rawTransactions]=await Promise.all([all('students'),all('transactions')]);
       const active=new Map(students.filter(s=>s.status!=='inactive').map(s=>[plain(s.code),s]));
       const resolved=reconcileTransactions(students,rawTransactions);
@@ -78,7 +80,9 @@
         if(!student||ids.length!==1||!Number.isSafeInteger(amount)||amount<=0){hold(held,'MANUAL_REVIEW_REQUIRED',t);continue;}
         const item=studentDueItems(student).find(x=>plain(x.id)===plain(ids[0]));
         if(!item||item.legacy||!Number.isSafeInteger(Number(item.amount))||Number(item.amount)<amount){hold(held,'INVALID_SCHOOL_CHARGE_OR_AMOUNT',t);continue;}
-        const period=periodKey(item.periodId || item.period);
+        // Do not infer annual period silently. It must be selected by the operator.
+        const annual=['insurance','mandatory'].includes(item.category);
+        const period=periodKey(item.periodId || item.period) || (annual ? academicYear : '');
         const key=[identity(student.name,student.className,student.birthDate),period,feeKey(item.name),Number(item.amount)].join('|');
         const matches=map.get(key)||[];
         if(!period||matches.length!==1){hold(held,matches.length>1?'AMBIGUOUS_PORTAL_CHARGE':'NO_EXACT_PORTAL_MATCH',t);continue;}
