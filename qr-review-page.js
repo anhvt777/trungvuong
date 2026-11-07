@@ -13,6 +13,25 @@ async function reviewedQrPage(req,env){
 (()=>{
 let items=[],current=null,checked=null;
 const e=id=>document.getElementById(id),reset=()=>{e('verified').checked=false;e('verified').disabled=true;e('approve').disabled=true;checked=null};
+const SRC='https://anhvt777.github.io';
+if(window.opener){
+ const challenge=Array.from(crypto.getRandomValues(new Uint8Array(20)),v=>v.toString(16).padStart(2,'0')).join('');
+ const ready=()=>window.opener.postMessage({type:'BIDV_QR_PORTAL_READY',challenge},SRC);
+ ready();
+ window.addEventListener('message',ev=>{
+   if(ev.origin!==SRC||ev.source!==window.opener)return;
+   if(ev.data?.type==='BIDV_QR_PORTAL_HELLO'){ready();return}
+   if(ev.data?.type!=='BIDV_QR_PORTAL_DRAFT'||ev.data.challenge!==challenge)return;
+   const data=ev.data.manifest;
+   if(!data||data.schema!=='bidvqrgen-parent-qr-manifest/1'||data.school_id!=='TRUNGVUONG'||data.status!=='UNVERIFIED_QR_DRAFT'||!Array.isArray(data.rows)||data.rows.length>200){e('counter').textContent='Bản nháp gửi trực tiếp không hợp lệ';return}
+   const txt=JSON.stringify(data);
+   if(txt.length>12000000){e('counter').textContent='Bản nháp quá lớn';return}
+   const dt=new DataTransfer();dt.items.add(new File([txt],'TRUNGVUONG_QR_DRAFT.json',{type:'application/json'}));
+   e('file').files=dt.files;e('file').dispatchEvent(new Event('change'));
+   e('status').textContent='Đã nhận danh mục từ bidvqrgen. Chưa công bố QR nào.';
+ });
+}
+
 function show(){
  reset();current=items[Number(e('choice').value)]||null;
  e('qr').hidden=!current;
