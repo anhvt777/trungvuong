@@ -64,3 +64,31 @@ Các kiểm thử trên là **kiểm thử logic bằng dữ liệu mẫu trong 
 ## Tiêu chí phát hành
 
 Chỉ hợp nhất vào `main` sau khi xác nhận ánh xạ ID không đổi qua kỳ thu, cơ chế nhiều lần nộp, nguồn mã giao dịch, thời gian thu thực tế, rollback và xử lý khi mất mạng. Không bật import giao dịch thật vào Worker demo.
+
+
+## Kết nối trực tiếp qua cửa sổ quản trị Access (07/11/2026)
+
+Đã xây dựng trên môi trường **DEMO**:
+- Trang quản trị Cloudflare `/admin/live-bridge` chỉ truy cập được sau xác thực Cloudflare Access; nhận dữ liệu qua `postMessage` từ đúng origin `https://anhvt777.github.io`, có challenge ngẫu nhiên, không đưa bí mật API vào frontend.
+- Trang `parent-sync-demo.html` của web trường (main) có nút **Kết nối trực tiếp với cổng phụ huynh (DEMO)**, chọn một món thu giả lập và truyền bản nháp qua cửa sổ quản trị.
+- Trên nhánh thử nghiệm, tab **Sao lưu & cài đặt** hiện công cụ đối chiếu khi thêm `?parentSyncPreview=1`, có nút kết nối sau khi tải bảng tham chiếu từ Cloudflare.
+- Tại cổng nhận, cán bộ bấm **Kiểm tra D1** rồi **Xác nhận ghi lô giả lập**. Không có ghi dữ liệu tự động; vẫn hỗ trợ nhập JSON khi popup bị chặn.
+- Worker `/api/admin/payments-sync` chỉ xử lý bản nháp có `DEMO-TV-` và ID món `tv_charge_` của 15 học sinh giả lập.
+
+### Cách thử từ web đã xuất bản
+
+1. Mở `https://anhvt777.github.io/trungvuong/parent-sync-demo.html` trên máy quản trị.
+2. Tải bảng tham chiếu riêng tư từ `https://school-parent-dev.tuananh0001.workers.dev/admin/charge-map`.
+3. Chọn file tham chiếu (60 khoản), chọn học sinh và món thu giả lập, chọn số tiền chưa vượt nghĩa vụ.
+4. Nhấn **Kết nối trực tiếp với cổng phụ huynh (DEMO)**.
+5. Nếu Cloudflare Access yêu cầu, đăng nhập tại cửa sổ mở ra. Nhấn **Kiểm tra D1**, xác minh mã giao dịch/số tiền, rồi mới chọn xác nhận hoặc đóng.
+6. Kiểm tra tại `/admin/reconciliation` và trang tra cứu học sinh.
+7. Nếu không thể mở popup, dùng nút **Tải bản nháp JSON** và nhập qua `/admin/payment-import`.
+
+### Chưa phải tích hợp vận hành thật
+
+- Luồng trực tiếp từ dữ liệu giao dịch *thực tế* của trường vẫn chỉ có trên nhánh thử nghiệm, chưa nhập vào main.
+- Cần kiểm tra bản nháp đối chiếu từ IndexedDB, phiên ngày/tháng, mã giao dịch ổn định, giao dịch gộp, thu đủ và hoàn tác trước khi mở sử dụng.
+- Không đồng bộ dữ liệu học sinh thật sang D1 hiện tại.
+- QR phụ huynh chỉ có thể công bố khi QR ngân hàng định danh do nhà trường xác minh, đúng tài khoản và đúng số tiền còn thiếu. Không tạo QR giả hoặc dùng QR chưa xác minh.
+- Chưa kiểm thử end-to-end thao tác đăng nhập popup và ghi dữ liệu trên trình duyệt thực; các giao diện đã được cập nhật mã nguồn và cần QA.
