@@ -382,7 +382,7 @@
       </section>
 
       <section class="page" id="page-settings">
-        <article class="panel" style="padding:18px;margin-bottom:18px"><h2>Chuẩn bị dữ liệu cổng phụ huynh</h2><p>Chỉ xuất tệp JSON để kiểm tra ngoại tuyến. Chưa tự gửi dữ liệu học sinh lên internet. Không đưa tệp vào GitHub.</p><button type="button" class="button button-primary" id="exportParentPreview">Xuất bản nháp đồng bộ phụ huynh (JSON)</button><p id="parentExportStatus" role="status"></p></article>
+        <article class="panel" style="padding:18px;margin-bottom:18px"><h2>Chuẩn bị dữ liệu cổng phụ huynh</h2><p>Chỉ xuất tệp JSON để kiểm tra ngoại tuyến. Chưa tự gửi dữ liệu học sinh lên internet. Không đưa tệp vào GitHub.</p><button type="button" class="button button-primary" id="exportParentPreview">Xuất bản nháp đồng bộ phụ huynh (JSON)</button><p id="parentExportStatus" role="status"></p><hr style="margin:18px 0;border:0;border-top:1px solid #dce8e5"><h3>Đối chiếu giao dịch đã nộp – Cổng phụ huynh (thử nghiệm)</h3><p>Xuất bản nháp giao dịch đã được đối chiếu trên máy để nhà trường kiểm tra. <strong>Chưa gửi dữ liệu lên Cloudflare</strong>; chỉ dùng dữ liệu giả lập ở giai đoạn này. Giao dịch chưa xác định một món thu sẽ tạm giữ để xác minh.</p><button type="button" class="button button-outline" id="exportParentPaymentsPreview">Xuất bản nháp giao dịch để đối chiếu (JSON)</button><p id="parentPaymentsExportStatus" role="status"></p></article>
         <div class="page-heading"><div><span class="eyebrow">AN TOÀN DỮ LIỆU</span><h1>Sao lưu & cài đặt</h1><p>Quản lý dữ liệu đang lưu trên thiết bị này.</p></div></div>
         <div class="settings-grid">
           <article class="panel setting-card"><div class="setting-icon">⤓</div><h2>Sao lưu dữ liệu</h2><p>Tải xuống bản sao lưu được mã hóa bằng mật khẩu, gồm học sinh, khoản thu, giao dịch và nhật ký.</p><button class="button button-primary" id="backupButton">Tạo bản sao lưu</button></article>
@@ -437,6 +437,7 @@
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="app.js?v=tv-month-20261106b"></script>
+  <script src="parent-payment-export.js?v=preview-20261107"></script>
   <script src="insurance.js"></script>
 </body>
 </html>
