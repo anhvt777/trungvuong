@@ -27,8 +27,26 @@
     return s;
   }
   const identity = (name,cls,dob) => [norm(name),norm(cls),dobISO(dob)].join('|');
+  function verifiedLocalTimestamp(raw){
+    const v=plain(raw);
+    if(/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(v)&&Number.isFinite(Date.parse(v)))return {iso:v,precision:'second'};
+    let m=/^(20\d{2})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
+    if(!m){
+      const vn=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
+      if(vn)m=[null,vn[3],vn[2].padStart(2,'0'),vn[1].padStart(2,'0'),vn[4],vn[5],vn[6]];
+    }
+    if(!m)return null;
+    const y=Number(m[1]),mo=Number(m[2]),d=Number(m[3]),h=Number(m[4]||0),minute=Number(m[5]||0),sec=Number(m[6]||0);
+    const test=new Date(Date.UTC(y,mo-1,d));
+    if(test.getUTCFullYear()!==y||test.getUTCMonth()+1!==mo||test.getUTCDate()!==d||h>23||minute>59||sec>59)return null;
+    const pad=n=>String(n).padStart(2,'0');
+    return {iso:`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(minute)}:${pad(sec)}+07:00`,precision:m[4]?'second':'date_only'};
+  }
+
   function refKey(t) {
-    const src = plain(t.ref || t.bankTransactionId || t.transactionId || t.id);
+    // Only real bank/manual transaction references are safe to use for financial idempotency.
+    // Row-generated IndexedDB IDs must not become bank settlement references.
+    const src = plain(t.ref || t.bankTransactionId || t.transactionId);
     const clean = src.toUpperCase().replace(/[^A-Z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,60);
     return clean ? 'DEMO-TV-'+clean : '';
   }
@@ -67,11 +85,9 @@
         const source_ref=refKey(t);
         if(!source_ref||refs.has(source_ref)){hold(held,'MISSING_OR_DUPLICATE_REF',t);continue;}
         refs.add(source_ref);
-        const paid_at_source=plain(t.date || t.paidAt);
-        // Do not guess ambiguous dates; require ISO with timezone to be eligible for API.
-        const dateOK=/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(paid_at_source)&&Number.isFinite(Date.parse(paid_at_source));
-        if(!dateOK){hold(held,'DATE_NEEDS_VERIFICATION',t);continue;}
-        payments.push({source_ref,charge_id:matches[0].portal_charge_id,school_charge_id:plain(item.id),school_student_id:plain(student.code),student_name:plain(student.name),class_name:plain(student.className),period_id:period,charge_name:plain(item.name),amount,paid_at:paid_at_source,mapping_status:'MATCHED_EXACT_DEMO'});
+        const paid_at_source=verifiedLocalTimestamp(t.date || t.paidAt);
+        if(!paid_at_source){hold(held,'DATE_NEEDS_VERIFICATION',t);continue;}
+        payments.push({source_ref,charge_id:matches[0].portal_charge_id,school_charge_id:plain(item.id),school_student_id:plain(student.code),student_name:plain(student.name),class_name:plain(student.className),period_id:period,charge_name:plain(item.name),amount,paid_at:paid_at_source.iso,time_precision:paid_at_source.precision,mapping_status:'MATCHED_EXACT_DEMO'});
       }
       if(!payments.length)throw Error('Chưa có giao dịch đủ điều kiện. Có '+held.length+' giao dịch cần rà soát. Hãy dùng dữ liệu DEMO đã xác minh trước khi đồng bộ.');
       const draft={schema:SCHEMA,school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),reference_generated_at:reference.generated_at,summary:{matched:payments.length,held:held.length,total_matched:payments.reduce((a,b)=>a+b.amount,0)},payments,held};
