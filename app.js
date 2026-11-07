@@ -777,17 +777,38 @@ function reconcileTransactions(students, transactions) {
     return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer',matchedBy:alias?'payment_code':(studentReported&&byCode.get(slug(studentReported))?'student_code':(identityStudent?'name_class':'derived'))};
   });
 }
-function feeSummaries(students, transactions) {
+// Count monetary allocations rather than treating any payment as full settlement.
+function paidAmountsByItem(transactions){
+  const out=new Map();
+  for(const tx of transactions){
+    if(tx.paymentStatus!=='valid')continue;
+    const ids=transactionMatchedItemIds(tx);
+    if(ids.length!==1)continue; // Bundle needs explicit allocation before amount can be split.
+    const value=Number(tx.amount);
+    if(!Number.isSafeInteger(value)||value<=0)continue;
+    const key=`${tx.studentCode}|${ids[0]}`;
+    out.set(key,(out.get(key)||0)+value);
+  }
+  return out;
+}
+function feeSummaries(students,transactions){
   const summaries=Object.fromEntries(FEES.map(f=>[f.key,{...f,due:0,paid:0,remain:0,dueItems:0,paidItems:0,pct:0}]));
-  const paidByStudent=new Map(),paidKeys=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByStudent=new Map(),amounts=paidAmountsByItem(transactions);
   students.forEach(student=>{
     studentDueItems(student).forEach(item=>{
-      const summary=summaries[item.category]||summaries.other,key=`${student.code}|${item.id}`;
-      summary.due+=item.amount;summary.dueItems++;
-      if(paidKeys.has(key)){summary.paid+=item.amount;summary.paidItems++;if(!paidByStudent.has(student.code))paidByStudent.set(student.code,{});const map=paidByStudent.get(student.code);map[item.category]=(map[item.category]||0)+item.amount;}
+      const summary=summaries[item.category]||summaries.other;
+      const key=`${student.code}|${item.id}`;
+      const paid=Math.min(item.amount,amounts.get(key)||0);
+      summary.due+=item.amount;summary.paid+=paid;summary.dueItems++;
+      if(paid>=item.amount)summary.paidItems++;
+      if(paid>0){
+        if(!paidByStudent.has(student.code))paidByStudent.set(student.code,{});
+        const record=paidByStudent.get(student.code);
+        record[item.category]=(record[item.category]||0)+paid;
+      }
     });
   });
-  Object.values(summaries).forEach(s=>{s.remain=Math.max(0,s.due-s.paid);s.pct=s.due?Math.min(100,Math.round(s.paid/s.due*100)):0;});
+  Object.values(summaries).forEach(x=>{x.remain=Math.max(0,x.due-x.paid);x.pct=x.due?Math.min(100,Math.round(x.paid/x.due*100)):0});
   return {summaries,paidByStudent};
 }
 function totals(students, transactions) {
@@ -848,8 +869,16 @@ function renderClasses(students, transactions) {
       const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
       const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
-      const paidKeys=new Set(classTransactions.filter(t=>t.paymentStatus==='valid').flatMap(t=>transactionPaidKeys(t).filter(key=>dueKeys.has(key))));
-      const paidItems=paidKeys.size;const paid=g.students.flatMap(s=>studentDueItems(s).map(item=>({s,item}))).filter(x=>itemMatchesFeeFilter(x.item,filter)&&paidKeys.has(`${x.s.code}|${x.item.id}`)).reduce((sum,x)=>sum+x.item.amount,0);
+      const paidAmounts=paidAmountsByItem(classTransactions);
+      let paidItems=0,paid=0;
+      for(const student of g.students)for(const item of studentDueItems(student)){
+        if(!itemMatchesFeeFilter(item,filter))continue;
+        const key=`${student.code}|${item.id}`;
+        if(!dueKeys.has(key))continue;
+        const itemPaid=Math.min(item.amount,paidAmounts.get(key)||0);
+        paid+=itemPaid;
+        if(itemPaid>=item.amount)paidItems++;
+      }
       m={dueItems:dueItems.length,paidItems,due,paid,remain:Math.max(0,due-paid)};
     }
     const pct=m.due?Math.min(100,Math.round(m.paid/m.due*100)):0;
@@ -2598,14 +2627,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
 async function exportParentPreview(){
   const [students,rawTransactions,qrConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount')]);
   const reconciled=reconcileTransactions(students,rawTransactions);
-  const paidByItem=new Map();
-  for(const t of reconciled.filter(t=>t.paymentStatus==='valid')){
-    const ids=transactionMatchedItemIds(t);
-    if(ids.length!==1)continue; // Multi-item bundles need separate exact allocations before posting.
-    const key=`${t.studentCode}|${ids[0]}`;
-    const amount=Number(t.amount);
-    if(Number.isSafeInteger(amount)&&amount>0)paidByItem.set(key,(paidByItem.get(key)||0)+amount);
-  }
+  const paidByItem=paidAmountsByItem(reconciled);
   const records=students.filter(s=>s.status!=='inactive').map(s=>({
     student_id:String(s.code||''),name:String(s.name||''),class_name:String(s.className||''),birth_date:String(s.birthDate||''),
     charges:studentDueItems(s).filter(i=>!i.legacy&&i.amount>0).map(i=>{
