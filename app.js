@@ -819,7 +819,7 @@ function totals(students, transactions) {
 }
 function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
-  const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByItem=paidAmountsByItem(reconciled);
   const query=slug($('#studentSearch')?.value||''),statusFilter=$('#studentStatusFilter')?.value||'active';
   const filtered=students.filter(s=>{
     const warningCount=studentWarnings(s).length,isActive=s.status!=='inactive';
@@ -836,7 +836,7 @@ function renderStudents(students, transactions) {
   }
   $('#studentsTable').innerHTML=filtered.length?filtered.map(s=>{
     const items=studentDueItems(s),due=items.reduce((sum,x)=>sum+x.amount,0);
-    const paid=items.filter(item=>paidByItem.has(`${s.code}|${item.id}`)).reduce((sum,x)=>sum+x.amount,0);
+    const paid=items.reduce((sum,item)=>sum+Math.min(item.amount,paidByItem.get(`${s.code}|${item.id}`)||0),0);
     const sourceNote=[s.studentType,s.registrationInfo,s.note].filter(Boolean).join(' · ');
     const warnings=studentWarnings(s),warn=warnings.length?`<span class="student-warning-badge" title="${escapeHTML(warnings.join(' · '))}">⚠ ${warnings.length}</span>`:'';
     const inactive=s.status==='inactive',statusLabel=inactive?(s.inactiveReason==='transfer_school'?'Chuyển trường':'Nghỉ học'):'Đang học';
@@ -2262,12 +2262,13 @@ async function exportClassFeeReport(){
       const items=studentDueItems(student).filter(item=>itemMatchesFeeFilter(item,filter));
       const itemIds=new Set(items.map(item=>item.id));
       const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&transactionMatchedItemIds(t).some(id=>itemIds.has(id)));
-      const paidKeys=new Set(valid.flatMap(transactionMatchedItemIds));
+      const amounts=paidAmountsByItem(valid);
       for(const item of items){
-        const isPaid=paidKeys.has(item.id);
-        const txn=valid.find(t=>transactionMatchesItem(t,item.id));
-        dueItems++;due+=item.amount;if(isPaid){paidItems++;paid+=item.amount;}
-        details.push([className,student.classStudentCode||'',student.code,student.name,item.name,item.feeCode||item.category||'',item.paymentCode||'',item.amount,isPaid?'Đã thu':'Chưa thu',isPaid?item.amount:0,isPaid?0:item.amount,txn?.date||'',txn?.ref||'']);
+        const itemPaid=Math.min(item.amount,amounts.get(`${student.code}|${item.id}`)||0);
+        const fullyPaid=itemPaid>=item.amount;
+        const related=valid.filter(t=>transactionMatchesItem(t,item.id));
+        dueItems++;due+=item.amount;paid+=itemPaid;if(fullyPaid)paidItems++;
+        details.push([className,student.classStudentCode||'',student.code,student.name,item.name,item.feeCode||item.category||'',item.paymentCode||'',item.amount,fullyPaid?'Đã thu đủ':itemPaid>0?'Đã thu một phần':'Chưa thu',itemPaid,Math.max(0,item.amount-itemPaid),related.map(x=>x.date||'').join('; '),related.map(x=>x.ref||'').join('; ')]);
       }
     }
     summary.push([className,classStudents.length,dueItems,paidItems,dueItems-paidItems,due,paid,Math.max(0,due-paid),due?paid/due:0]);
