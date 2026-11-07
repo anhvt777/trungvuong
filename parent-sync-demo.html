@@ -128,6 +128,7 @@
       feedback.textContent='Đã chuyển bản nháp DEMO sang trang Cloudflare Access. Hãy xem trước và xác nhận tại cửa sổ mới; chưa ghi tự động.';
     };
     window.addEventListener('message',listener);
+    popup.postMessage({type:'TV_PORTAL_HELLO'},portOrigin);
     feedback.className='muted';feedback.textContent='Đang mở Cloudflare Access. Nếu được yêu cầu, hãy đăng nhập để tiếp tục.';
   });
 })();
