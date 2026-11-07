@@ -68,3 +68,29 @@ Trả về `preview_id`, `payload_emv`, `qr_png`, `amount`, `account`, `valid_un
 - Báo cáo: `https://school-parent-dev.tuananh0001.workers.dev/admin/reconciliation`.
 - Kiểm tra QR: `https://school-parent-dev.tuananh0001.workers.dev/admin/qr-status`.
 
+
+
+## Kết nối QR từ bidvqrgen (07/11/2026 – DEMO)
+
+**Đã triển khai:**
+- Bộ sinh QR hàng loạt `https://anhvt777.github.io/bidvqrgen/` có 2 nút: **Xuất danh mục QR** (JSON cục bộ) và **Kết nối trực tiếp cổng phụ huynh (DEMO)**.
+- Bộ xuất lấy dữ liệu **AccountNumber, BankBin, Amount, AccountName, Remark, StudentName, Class, FeeName, StudentID** đúng từ Excel hiện tại. Không tự sinh một tài khoản ngân hàng khác; payload EMV được tạo cục bộ và lưu cùng ảnh QR. Không tự tải ảnh lên Cloudflare.
+- Màn hình duyệt QR `/admin/qr-review` chỉ cho người đăng nhập Cloudflare Access; nhận file JSON hoặc dữ liệu chuyển trực tiếp từ bộ sinh QR bằng `postMessage` có challenge ngẫu nhiên và kiểm tra origin.
+- API `/api/admin/qr-review` kiểm tra mã trường, BIN BIDV 970418, tài khoản nhận, mã định danh (`payment_reference`), tên/lớp, tên khoản, **số tiền chính xác còn thiếu trên D1**, payload EMV/CRC, PNG và trạng thái xác minh.
+- Cán bộ phải quét QR bằng ứng dụng ngân hàng và xác nhận trước khi lưu `qr_verified=1`; bản demo được lưu `qr_source='DEMO_ONLY'` kèm dấu vết phê duyệt, không tự coi là giao dịch ngân hàng.
+- Cổng phụ huynh chỉ trả ảnh QR nếu `qr_verified=1`, ảnh hợp lệ và `qr_amount == remaining > 0`. Khi có khoản nộp một phần mới, QR số tiền cũ lập tức không còn đủ điều kiện hiển thị.
+- Nhánh thử nghiệm web Trưng Vương có nút **Xuất QR số dư còn thiếu (giữ tài khoản cũ)** trong mục xuất bảng kê tạo QR; tệp .xlsx đúng 11 cột dùng lại tại bidvqrgen.
+
+### Chu trình kiểm thử dự kiến
+
+1. Tại web trường bản nhánh thử nghiệm: ghi nhận giao dịch BIDV Direct giả lập, xác minh khớp món, kỳ và tổng còn thiếu. Chỉ dùng dữ liệu giả.
+2. Mục **Thiết lập khoản thu → Xuất bảng kê tạo QR**, chọn đúng lớp/khoản/kỳ. Với học sinh đã nộp một phần, chọn **Xuất QR số dư còn thiếu**; tài khoản định danh phải giữ nguyên.
+3. Tải .xlsx lên **bidvqrgen**, kiểm tra mẫu QR trên trang, chọn **Kết nối trực tiếp cổng phụ huynh (DEMO)** (hoặc tải JSON dự phòng).
+4. Trong trang `/admin/qr-review`, chọn từng món, bấm **Đối chiếu với D1**. Kiểm tra đúng lớp, tên, kỳ, số tiền còn thiếu, tài khoản và Remark; quét bằng app ngân hàng rồi xác nhận. Nếu không xác minh được tài khoản/QR thật, không phê duyệt.
+5. Tra cứu trên `/admin/reconciliation` và cổng phụ huynh. QR hợp lệ sẽ hiển thị đối với món chưa thu đủ.
+6. Ghi thêm một khoản thu DEMO, tái tra cứu: QR số tiền cũ không được hiển thị. Xuất lại file QR số dư còn thiếu và duyệt lại để hiện QR mới.
+7. Nạp lại cùng sao kê và cùng mã giao dịch: không tăng thu; thử lô nhiều khoản cùng món, cố gắng ghi vượt nghĩa vụ phải bị từ chối.
+
+**Đã kiểm thử logic:** payload tạo ở bidvqrgen khớp thuật toán kiểm tra EMV của Worker; đối chiếu QR 600.000đ cho nghĩa vụ còn 400.000đ → `HELD/AMOUNT_CHANGED`; 400.000đ → `PREVIEW`; payload bị sửa → bị từ chối; request khác origin → bị từ chối. Những bài test này không thao tác tài khoản ngân hàng.
+
+**Chưa xác nhận:** đăng nhập Access + popup + quét app ngân hàng + bước duyệt mã QR end-to-end trên thiết bị thật, vì chưa có file QR/tài khoản được ngân hàng xác minh. D1 hiện chưa có QR được công bố. Chưa triển khai tài khoản thật/đa trường. Không dùng QR DEMO để thu tiền thật.
