@@ -74,6 +74,7 @@
         if(!dateOK){hold(held,'DATE_NEEDS_VERIFICATION',t);continue;}
         payments.push({source_ref,charge_id:matches[0].portal_charge_id,school_charge_id:plain(item.id),school_student_id:plain(student.code),student_name:plain(student.name),class_name:plain(student.className),period_id:period,charge_name:plain(item.name),amount,paid_at:paid_at_source,mapping_status:'MATCHED_EXACT_DEMO'});
       }
+      if(!payments.length){ if(status)status.textContent='Không có giao dịch đã xác minh đủ điều kiện xuất. '+held.length+' giao dịch cần rà soát; nếu chỉ có file danh sách học sinh thì chưa phải dữ liệu thanh toán. Hãy nhập một giao dịch DEMO vào web trường và kiểm tra tình trạng đã thu trước khi xuất.'; return; }
       const draft={schema:SCHEMA,school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),reference_generated_at:reference.generated_at,summary:{matched:payments.length,held:held.length,total_matched:payments.reduce((a,b)=>a+b.amount,0)},payments,held};
       const file='TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_'+new Date().toISOString().slice(0,10)+'.json';
       download(file,JSON.stringify(draft,null,2),'application/json;charset=utf-8');
@@ -84,6 +85,9 @@
     }
   }
   document.addEventListener('DOMContentLoaded',()=>{
-    document.querySelector('#exportParentPaymentsPreview')?.addEventListener('click',exportPreview);
+    const tester = new URLSearchParams(location.search).get('parentSyncPreview') === '1';
+    const panel = document.querySelector('#parentPaymentsPreviewPanel');
+    if (panel) panel.hidden = !tester;
+    if (tester) document.querySelector('#exportParentPaymentsPreview')?.addEventListener('click',exportPreview);
   });
 })();
