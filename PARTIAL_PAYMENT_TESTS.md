@@ -28,3 +28,18 @@ Mục tiêu: mỗi giao dịch tiền mặt/thủ công có **mã giao dịch du
 - Giao dịch import lặp không tăng số dư.
 - Nhiều giao dịch cùng khoản trong một lô được kiểm soát tổng tiền.
 - QR định danh đối với nộp một phần chỉ hiển thị khi đã kiểm tra đúng số tiền còn lại.
+
+## Kết quả cập nhật ngày 07/11/2026 (nhánh thử nghiệm)
+
+- `feeSummaries` và `totals`: tính theo tiền thực nộp cho món có phân bổ đơn, không đánh dấu cả món nếu chỉ có tiền nộp một phần.
+- `renderStudents`: hiển thị số thực thu trên từng học sinh.
+- `renderClasses`: số tiền và tiến độ theo lớp/khoản thu phản ánh lũy kế.
+- Báo cáo Excel chi tiết theo lớp: phân biệt *chưa thu / đã thu một phần / đã thu đủ*, cộng số tiền đã nộp và đưa các mã giao dịch có liên quan vào cột tra soát.
+- Thêm `tests/partial-payments.test.mjs`, kiểm thử nộp hai lần, thu đủ, hoàn tác/trùng, phân bổ gộp chưa xác minh và không ghi vượt nghĩa vụ vào báo cáo.
+- Đã kiểm tra cú pháp toàn bộ `app.js` và chạy kiểm thử hàm lõi với dữ liệu mẫu.
+
+### Chưa hoàn tất
+
+- Các báo cáo/luồng khác vẫn có chỗ dùng `paidKeys`, `claimed` và cơ chế coi một món có giao dịch là đã thu đủ. Chưa đưa nhánh vào main vì cần rà soát hết các đường xử lý QR, thông báo, tiền mặt, xuất bảng kê.
+- Schema D1 hiện đã có `UNIQUE(school_id, source_ref)`. Chưa có kiểm thử race-condition/chống vượt số dư bằng giao dịch đồng thời; chưa bổ sung migration chưa được kiểm thử.
+- QR thu số tiền còn thiếu phải được kiểm tra tại thời điểm phát hành; không dùng QR cũ sau lần nộp một phần.
