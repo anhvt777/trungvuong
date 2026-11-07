@@ -1297,10 +1297,11 @@ function qrFileStudentCode(student,mode){
   return feeSafeCode(student.code,24);
 }
 function qrFileAllEntries(students,catalog,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const allocated=paidAmountsByItem(transactions,students);
   return students.flatMap(student=>studentDueItems(student).filter(item=>num(item.amount)>0).map(item=>({
     student,item,
-    paid:paid.has(`${student.code}|${item.id}`),
+    paid:(allocated.get(`${student.code}|${item.id}`)||0)>=num(item.amount),
+    remaining:Math.max(0,num(item.amount)-(allocated.get(`${student.code}|${item.id}`)||0)),
     feeKey:item.catalogId?`catalog:${item.catalogId}`:`source:${item.category}`,
     feeName:item.name||getFeeLabel(item.category),
     feeShort:item.shortCode||catalog.find(f=>f.id===item.catalogId)?.shortCode||defaultFeeShortCode(item.category,item.feeCode||item.category)
@@ -1355,7 +1356,7 @@ async function updateQrFilePreview(students,catalog,transactions=[]){
   $('#qrFileAccountPreview').textContent=account;
   $('#qrFileRemarkPreview').textContent=remark;
 }
-async function qrFileRows(validateOnly=false){
+async function qrFileRows(validateOnly=false,balanceOnly=false){
   const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);
   const transactions=reconcileTransactions(students,stored),entries=qrFileFilteredEntries(students,catalog,transactions);
   if(!entries.length)throw new Error('Không có món thu phù hợp để xuất QR.');
@@ -1365,7 +1366,8 @@ async function qrFileRows(validateOnly=false){
   const seen=new Set(),rows=[],changes=new Map();
   for(const e of entries){
     if(tvIsMonthlyFee(e.feeShort,e.feeName))tvCheckItemPeriod(e.item,period);
-    const accountNumber=qrFileAccountNumber(prefix,e.student,e.item,period,e.feeShort);
+    const accountNumber=balanceOnly?String(e.item.qrAccountNumber||'').trim():qrFileAccountNumber(prefix,e.student,e.item,period,e.feeShort);
+    if(balanceOnly&&(!accountNumber||e.remaining<=0))continue;
     if(!accountNumber)throw new Error(`Không tạo được AccountNumber cho ${e.student.name}.`);
     if(!/^[A-Z0-9]+$/.test(accountNumber))throw new Error(`AccountNumber không hợp lệ: ${accountNumber}`);
     if(seen.has(accountNumber))throw new Error(`Trùng AccountNumber: ${accountNumber}. Hãy đổi tiền tố hoặc cấu trúc mã.`);
@@ -1375,17 +1377,19 @@ async function qrFileRows(validateOnly=false){
     const remark=qrFileText(`${accountName} NOP ${feeName} ${period}`,140);
     if(!accountName||!remark)throw new Error(`Thiếu AccountName/Remark của ${e.student.name}.`);
     rows.push([
-      accountNumber,bank,bankBin,num(e.item.amount),accountName,remark,
+      accountNumber,bank,bankBin,balanceOnly?e.remaining:num(e.item.amount),accountName,remark,
       e.student.className||'',e.student.externalCode||e.student.code||'',qrFileDate(e.student.birthDate),
       e.feeName||'',e.student.name||''
     ]);
+    if(balanceOnly)continue; // Never alter account identifiers when updating QR remaining balance.
     if(e.paid&&e.item.qrAccountNumber&&slug(e.item.qrAccountNumber)!==slug(accountNumber))throw new Error('Khoản '+e.feeName+' của '+e.student.name+' đã ghi nhận thanh toán; không thể đổi tài khoản định danh.');
     if(slug(e.item.qrAccountNumber)!==slug(accountNumber)||(tvIsMonthlyFee(e.feeShort,e.feeName)&&!e.item.periodId)){
       if(!changes.has(e.student.code))changes.set(e.student.code,new Map());
       changes.get(e.student.code).set(e.item.id,{accountNumber,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
     }
   }
-  if(validateOnly)return {rows,changes};
+  if(!rows.length)throw new Error('Không có khoản còn thiếu đã có tài khoản định danh. Xuất QR định danh lần đầu trước.');
+  if(validateOnly||balanceOnly)return {rows,changes};
   if(changes.size){
     const updated=students.map(s=>{
       const m=changes.get(s.code);if(!m)return s;
@@ -1404,9 +1408,9 @@ async function validateQrFileExport(){
   $('#qrFileStatus').textContent=`Hợp lệ: ${out.rows.length} dòng · ${new Set(out.rows.map(r=>r[0])).size} AccountNumber duy nhất · đúng 11 cột mẫu.`;
   toast(`Đã kiểm tra ${out.rows.length} dòng file QR.`);
 }
-async function exportQrFileXlsx(){
+async function exportQrFileXlsx(balanceOnly=false){
   if(typeof JSZip==='undefined')throw new Error('Thiếu thư viện xuất Excel. Hãy tải lại trang.');
-  const out=await qrFileRows(false),rows=out.rows;
+  const out=await qrFileRows(false,balanceOnly),rows=out.rows;
   const headers=['AccountNumber','Bank','BankBin','Amount','AccountName','Remark','Class','StudentID','Ngày sinh','Khoản Thu','Họ tên'];
   const zip=new JSZip();
   zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
@@ -1419,8 +1423,8 @@ async function exportQrFileXlsx(){
   const blankSheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t></t></is></c></row></sheetData></worksheet>';
   const sheets=zip.folder('xl').folder('worksheets');sheets.file('sheet1.xml',sheet1);sheets.file('sheet2.xml',blankSheet);sheets.file('sheet3.xml',blankSheet);
   const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`File_tao_QR_dinh_danh_${new Date().toISOString().slice(0,10)}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
-  $('#qrFileStatus').textContent=`Đã xuất ${rows.length} dòng theo đúng 11 cột mẫu Test 6E.xlsx.`;
+  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`File_tao_QR_${balanceOnly?'SO_DU_CON_THIEU_':'dinh_danh_'}${new Date().toISOString().slice(0,10)}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
+  $('#qrFileStatus').textContent=`Đã xuất ${rows.length} dòng theo đúng 11 cột. ${balanceOnly?'Chỉ xuất số dư còn thiếu và giữ nguyên tài khoản định danh.':'File QR định danh'}`;
   await refresh();toast(`Đã xuất ${rows.length} dòng tạo QR.`);
 }
 async function renderFeeSetup(students){
@@ -2590,6 +2594,7 @@ function wire() {
   $('#qrFileOnlyUnpaid').addEventListener('change',async()=>{const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);updateQrFilePreview(students,catalog,reconcileTransactions(students,stored));});
   $('#qrFileValidate').onclick=()=>validateQrFileExport().catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'File QR chưa hợp lệ.';toast(e.message||'File QR chưa hợp lệ.',true);});
   $('#qrFileExport').onclick=()=>exportQrFileXlsx().catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'Không xuất được file QR.';toast(e.message||'Không xuất được file QR.',true);});
+  $('#qrFileRemainingExport').onclick=()=>exportQrFileXlsx(true).catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'Không xuất được số dư QR.';toast(e.message||'Không xuất được số dư QR.',true);});
   const rerenderCashSession=async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderCashSession(students,reconcileTransactions(students,stored));};
   $('#cashSessionClass').addEventListener('change',async()=>{const draft=await getCashSessionDraft();draft.className=$('#cashSessionClass').value;await saveCashSessionDraft(draft);await rerenderCashSession();});
   $('#cashSessionSearch').addEventListener('input',rerenderCashSession);
