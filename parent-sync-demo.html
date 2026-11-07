@@ -97,7 +97,7 @@
     if(!date.value||!Number.isFinite(dt.valueOf()))throw Error('Thời gian không hợp lệ.');
     const rand=Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
     const source_ref='DEMO-TV-PORTAL-'+rand;
-    const payment={source_ref,charge_id:selected.portal_charge_id,school_student_id:'',student_name:String(selected.student_name),class_name:String(selected.class_name),period_id:String(selected.period_id||''),charge_name:String(selected.charge_name||''),amount:value,paid_at:dt.toISOString().replace(/\\.\\d{3}Z$/,'Z'),mapping_status:'MATCHED_EXACT_DEMO'};
+    const payment={source_ref,charge_id:selected.portal_charge_id,school_student_id:'',student_name:String(selected.student_name),class_name:String(selected.class_name),period_id:String(selected.period_id||''),charge_name:String(selected.charge_name||''),amount:value,paid_at:dt.toISOString().replace(/\.\d{3}Z$/,'Z'),mapping_status:'MATCHED_EXACT_DEMO'};
     return {schema:'school-parent-payments-draft/2',school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),summary:{matched:1,held:0,total_matched:value},payments:[payment],held:[]};
   }
   button.addEventListener('click',()=>{
