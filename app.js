@@ -718,6 +718,8 @@ function reconcileTransactions(students, transactions) {
   students.forEach(student=>studentDueItems(student).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),{student,item});for(const alias of item.paymentCodeAliases||[])if(alias)byPaymentCode.set(slug(alias),{student,item});if(item.qrAccountNumber)byPaymentCode.set(slug(item.qrAccountNumber),{student,item});}));
   const reportIndexes=buildStudentReportIndexes(students);
   const claimed=new Set();
+  // Manual transactions may pay one charge in installments; track value and stable transaction identity.
+  const allocationTotals=new Map(),seenPaymentRefs=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
     const insuranceResult=reconcileInsuranceTransaction(t,byCode,claimed);
     if(insuranceResult)return insuranceResult;
@@ -733,11 +735,27 @@ function reconcileTransactions(students, transactions) {
     if(['cash','direct_school','manual_collection'].includes(t.sourceType)&&t.manualDueItemId){
       const item=studentItems.find(x=>x.id===t.manualDueItemId);
       if(!item)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'no_due',feeCategory:category};
-      if(item.amount!==amount)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
       const key=`${student.code}|${item.id}`;
-      if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
-      claimed.add(key);
-      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'cash'};
+      const txnIdentity=String(t.ref||t.transactionId||t.id||'').trim();
+      if(!txnIdentity)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'missing_transaction_id',feeCategory:item.category};
+      if(seenPaymentRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      const already=allocationTotals.get(key)||0;
+      if(!Number.isSafeInteger(amount)||amount<=0||item.legacy||already+amount>item.amount||claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
+      seenPaymentRefs.add(txnIdentity);
+      allocationTotals.set(key,already+amount);
+      if(already+amount===item.amount)claimed.add(key);
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'cash',partialPayment:already+amount<item.amount};
+    }
+    if(alias?.item&&!alias.item.legacy){
+      const item=alias.item,key=`${student.code}|${item.id}`,txnIdentity=String(t.ref||t.transactionId||t.id||'').trim();
+      if(!txnIdentity)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'missing_transaction_id',feeCategory:item.category};
+      if(seenPaymentRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      const already=allocationTotals.get(key)||0;
+      if(!Number.isSafeInteger(amount)||amount<=0||already+amount>item.amount||claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
+      seenPaymentRefs.add(txnIdentity);
+      allocationTotals.set(key,already+amount);
+      if(already+amount===item.amount)claimed.add(key);
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer',matchedBy:'payment_code',partialPayment:already+amount<item.amount};
     }
     if(!alias){
       const bundle=noticeBundleForTransaction(t,student);
@@ -770,17 +788,45 @@ function reconcileTransactions(students, transactions) {
     return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer',matchedBy:alias?'payment_code':(studentReported&&byCode.get(slug(studentReported))?'student_code':(identityStudent?'name_class':'derived'))};
   });
 }
-function feeSummaries(students, transactions) {
+// Count monetary allocations rather than treating any payment as full settlement.
+function paidAmountsByItem(transactions,students=[]){
+  const out=new Map(),obligations=new Map();
+  for(const student of students)for(const item of studentDueItems(student))obligations.set(`${student.code}|${item.id}`,Number(item.amount));
+  for(const tx of transactions){
+    if(tx.paymentStatus!=='valid')continue;
+    const ids=[...new Set(transactionMatchedItemIds(tx))],value=Number(tx.amount);
+    if(!Number.isSafeInteger(value)||value<=0||!ids.length)continue;
+    if(ids.length===1){
+      const key=`${tx.studentCode}|${ids[0]}`;
+      out.set(key,(out.get(key)||0)+value);
+      continue;
+    }
+    // A bundle is credited only when every full-item amount sums exactly to the transaction.
+    const keys=ids.map(id=>`${tx.studentCode}|${id}`),parts=keys.map(key=>obligations.get(key));
+    if(parts.some(amount=>!Number.isSafeInteger(amount)||amount<=0))continue;
+    if(parts.reduce((sum,amount)=>sum+amount,0)!==value)continue;
+    keys.forEach((key,i)=>out.set(key,(out.get(key)||0)+parts[i]));
+  }
+  return out;
+}
+function feeSummaries(students,transactions){
   const summaries=Object.fromEntries(FEES.map(f=>[f.key,{...f,due:0,paid:0,remain:0,dueItems:0,paidItems:0,pct:0}]));
-  const paidByStudent=new Map(),paidKeys=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByStudent=new Map(),amounts=paidAmountsByItem(transactions,students);
   students.forEach(student=>{
     studentDueItems(student).forEach(item=>{
-      const summary=summaries[item.category]||summaries.other,key=`${student.code}|${item.id}`;
-      summary.due+=item.amount;summary.dueItems++;
-      if(paidKeys.has(key)){summary.paid+=item.amount;summary.paidItems++;if(!paidByStudent.has(student.code))paidByStudent.set(student.code,{});const map=paidByStudent.get(student.code);map[item.category]=(map[item.category]||0)+item.amount;}
+      const summary=summaries[item.category]||summaries.other;
+      const key=`${student.code}|${item.id}`;
+      const paid=Math.min(item.amount,amounts.get(key)||0);
+      summary.due+=item.amount;summary.paid+=paid;summary.dueItems++;
+      if(paid>=item.amount)summary.paidItems++;
+      if(paid>0){
+        if(!paidByStudent.has(student.code))paidByStudent.set(student.code,{});
+        const record=paidByStudent.get(student.code);
+        record[item.category]=(record[item.category]||0)+paid;
+      }
     });
   });
-  Object.values(summaries).forEach(s=>{s.remain=Math.max(0,s.due-s.paid);s.pct=s.due?Math.min(100,Math.round(s.paid/s.due*100)):0;});
+  Object.values(summaries).forEach(x=>{x.remain=Math.max(0,x.due-x.paid);x.pct=x.due?Math.min(100,Math.round(x.paid/x.due*100)):0});
   return {summaries,paidByStudent};
 }
 function totals(students, transactions) {
@@ -791,7 +837,7 @@ function totals(students, transactions) {
 }
 function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
-  const paidByItem=new Set(reconciled.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByItem=paidAmountsByItem(reconciled,students);
   const query=slug($('#studentSearch')?.value||''),statusFilter=$('#studentStatusFilter')?.value||'active';
   const filtered=students.filter(s=>{
     const warningCount=studentWarnings(s).length,isActive=s.status!=='inactive';
@@ -808,7 +854,7 @@ function renderStudents(students, transactions) {
   }
   $('#studentsTable').innerHTML=filtered.length?filtered.map(s=>{
     const items=studentDueItems(s),due=items.reduce((sum,x)=>sum+x.amount,0);
-    const paid=items.filter(item=>paidByItem.has(`${s.code}|${item.id}`)).reduce((sum,x)=>sum+x.amount,0);
+    const paid=items.reduce((sum,item)=>sum+Math.min(item.amount,paidByItem.get(`${s.code}|${item.id}`)||0),0);
     const sourceNote=[s.studentType,s.registrationInfo,s.note].filter(Boolean).join(' · ');
     const warnings=studentWarnings(s),warn=warnings.length?`<span class="student-warning-badge" title="${escapeHTML(warnings.join(' · '))}">⚠ ${warnings.length}</span>`:'';
     const inactive=s.status==='inactive',statusLabel=inactive?(s.inactiveReason==='transfer_school'?'Chuyển trường':'Nghỉ học'):'Đang học';
@@ -841,8 +887,16 @@ function renderClasses(students, transactions) {
       const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
       const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
-      const paidKeys=new Set(classTransactions.filter(t=>t.paymentStatus==='valid').flatMap(t=>transactionPaidKeys(t).filter(key=>dueKeys.has(key))));
-      const paidItems=paidKeys.size;const paid=g.students.flatMap(s=>studentDueItems(s).map(item=>({s,item}))).filter(x=>itemMatchesFeeFilter(x.item,filter)&&paidKeys.has(`${x.s.code}|${x.item.id}`)).reduce((sum,x)=>sum+x.item.amount,0);
+      const paidAmounts=paidAmountsByItem(classTransactions,g.students);
+      let paidItems=0,paid=0;
+      for(const student of g.students)for(const item of studentDueItems(student)){
+        if(!itemMatchesFeeFilter(item,filter))continue;
+        const key=`${student.code}|${item.id}`;
+        if(!dueKeys.has(key))continue;
+        const itemPaid=Math.min(item.amount,paidAmounts.get(key)||0);
+        paid+=itemPaid;
+        if(itemPaid>=item.amount)paidItems++;
+      }
       m={dueItems:dueItems.length,paidItems,due,paid,remain:Math.max(0,due-paid)};
     }
     const pct=m.due?Math.min(100,Math.round(m.paid/m.due*100)):0;
@@ -934,8 +988,13 @@ function buildVietQrPayload(config,amount,remark){
   payload+=crc16ccitt(payload);return payload;
 }
 function qrCandidates(students,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
-  return students.flatMap(student=>studentDueItems(student).filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0).map(item=>({student,item,paid:paid.has(`${student.code}|${item.id}`)})));
+  const allocated=paidAmountsByItem(transactions,students);
+  return students.flatMap(student=>studentDueItems(student)
+    .filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0)
+    .map(item=>{
+      const paidAmount=Math.min(item.amount,allocated.get(`${student.code}|${item.id}`)||0);
+      return {student,item,paid:paidAmount>=item.amount,paidAmount,remaining:Math.max(0,item.amount-paidAmount)};
+    }));
 }
 function renderQrPage(students,transactions,config){
   if(config){$('#qrBankBin').value=config.bin||'';$('#qrAccountNumber').value=config.accountNumber||'';$('#qrAccountName').value=config.accountName||'';$('#qrConfigStatus').textContent='Đã lưu trên thiết bị này';}
@@ -953,7 +1012,7 @@ async function saveQrConfig(){
   if(!config.accountName)return toast('Hãy nhập tên chủ tài khoản.',true);
   await request('meta','put',config);$('#qrAccountName').value=config.accountName;$('#qrConfigStatus').textContent='Đã lưu trên thiết bị này';toast('Đã lưu tài khoản nhận cục bộ.');
 }
-function qrFilename(entry){return `${slug(entry.student.className||'lop')}_${slug(entry.student.name)}_${slug(entry.student.code)}_${slug(entry.item.name)}.png`;}
+function qrFilename(entry){return `${slug(entry.student.className||'lop')}_${slug(entry.student.name)}_${slug(entry.student.code)}_${slug(entry.item.name)}_${entry.remaining}VND.png`;}
 function renderQrCards(entries){
   if(!entries.length){$('#qrPreviewGrid').innerHTML='<div class="panel qr-empty-state">Không có món phù hợp với điều kiện đã chọn.</div>';return;}
   $('#qrPreviewGrid').innerHTML=entries.map((entry,index)=>`<article class="panel qr-result-card"><div class="qr-result-top"><span class="category-badge ${entry.item.category==='service'?'service':''}">${escapeHTML(entry.item.name)}</span><span class="qr-class-tag">${escapeHTML(entry.student.className||'Chưa xếp lớp')}</span></div><div class="qr-person"><strong>${escapeHTML(entry.student.name)}</strong><small>${escapeHTML(entry.student.code)}</small></div><img src="${entry.png}" alt="Mã QR ${escapeHTML(entry.student.code)} ${escapeHTML(entry.item.name)}"><div class="qr-amount">${money(entry.item.amount)}</div><div class="qr-result-footer"><span>${escapeHTML(entry.remark)}</span><a class="button button-outline button-small" href="${entry.png}" download="${escapeHTML(entry.filename)}">Lưu PNG</a></div></article>`).join('');
@@ -969,13 +1028,16 @@ async function generateQrs(){
   for(const entry of entries){
     const key=`${entry.student.code}|${entry.item.id}`;if(unique.has(key))continue;unique.add(key);
     const code=entry.item.category==='insurance'?'BHYT':entry.item.category==='mandatory'?'BHTT':qrText(entry.item.name,12).replace(/\s+/g,'');
-    const remark=qrText(entry.item.paymentCode||`${entry.student.code} ${code}`,25);const payload=buildVietQrPayload(config,entry.item.amount,remark);
+    const remark=qrText(entry.item.qrAccountNumber||entry.item.paymentCode||`${entry.student.code} ${code}`,25);
+    // Generate only the unpaid balance. Do not publish until account/QR has been verified by the school.
+    if(entry.remaining<=0)continue;
+    const payload=buildVietQrPayload(config,entry.remaining,remark);
     const holder=document.createElement('div');new QRCode(holder,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
     const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được ảnh QR trên trình duyệt này.');
     output.push({...entry,remark,filename:qrFilename(entry),png:canvas.toDataURL('image/png')});
   }
   renderQrCards(output);$('#qrSelectionCount').textContent=`${output.length} ảnh QR đã tạo`;
-  $('#qrPreviewSummary').textContent=`${output.length} mã, mỗi mã gắn với đúng một học sinh và một món thu.`;
+  $('#qrPreviewSummary').textContent=`${output.length} mã QR theo số dư còn thiếu (chưa đồng bộ lên cổng phụ huynh). Phải xác minh tài khoản và tiền còn thiếu trước khi công bố.`;
   const zip=new JSZip();for(const item of output)zip.folder(qrText(item.student.className||'Chua_xep_lop',30)||'Chua_xep_lop').file(item.filename,item.png.split(',')[1],{base64:true});
   $('#downloadQrs').onclick=async()=>{const blob=await zip.generateAsync({type:'blob'});download(`SchoolCollect_QR_${new Date().toISOString().slice(0,10)}.zip`,blob,'application/zip');};
   $('#downloadQrs').hidden=false;
@@ -1235,10 +1297,11 @@ function qrFileStudentCode(student,mode){
   return feeSafeCode(student.code,24);
 }
 function qrFileAllEntries(students,catalog,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const allocated=paidAmountsByItem(transactions,students);
   return students.flatMap(student=>studentDueItems(student).filter(item=>num(item.amount)>0).map(item=>({
     student,item,
-    paid:paid.has(`${student.code}|${item.id}`),
+    paid:(allocated.get(`${student.code}|${item.id}`)||0)>=num(item.amount),
+    remaining:Math.max(0,num(item.amount)-(allocated.get(`${student.code}|${item.id}`)||0)),
     feeKey:item.catalogId?`catalog:${item.catalogId}`:`source:${item.category}`,
     feeName:item.name||getFeeLabel(item.category),
     feeShort:item.shortCode||catalog.find(f=>f.id===item.catalogId)?.shortCode||defaultFeeShortCode(item.category,item.feeCode||item.category)
@@ -1293,7 +1356,7 @@ async function updateQrFilePreview(students,catalog,transactions=[]){
   $('#qrFileAccountPreview').textContent=account;
   $('#qrFileRemarkPreview').textContent=remark;
 }
-async function qrFileRows(validateOnly=false){
+async function qrFileRows(validateOnly=false,balanceOnly=false){
   const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);
   const transactions=reconcileTransactions(students,stored),entries=qrFileFilteredEntries(students,catalog,transactions);
   if(!entries.length)throw new Error('Không có món thu phù hợp để xuất QR.');
@@ -1303,7 +1366,8 @@ async function qrFileRows(validateOnly=false){
   const seen=new Set(),rows=[],changes=new Map();
   for(const e of entries){
     if(tvIsMonthlyFee(e.feeShort,e.feeName))tvCheckItemPeriod(e.item,period);
-    const accountNumber=qrFileAccountNumber(prefix,e.student,e.item,period,e.feeShort);
+    const accountNumber=balanceOnly?String(e.item.qrAccountNumber||'').trim():qrFileAccountNumber(prefix,e.student,e.item,period,e.feeShort);
+    if(balanceOnly&&(!accountNumber||e.remaining<=0))continue;
     if(!accountNumber)throw new Error(`Không tạo được AccountNumber cho ${e.student.name}.`);
     if(!/^[A-Z0-9]+$/.test(accountNumber))throw new Error(`AccountNumber không hợp lệ: ${accountNumber}`);
     if(seen.has(accountNumber))throw new Error(`Trùng AccountNumber: ${accountNumber}. Hãy đổi tiền tố hoặc cấu trúc mã.`);
@@ -1313,17 +1377,19 @@ async function qrFileRows(validateOnly=false){
     const remark=qrFileText(`${accountName} NOP ${feeName} ${period}`,140);
     if(!accountName||!remark)throw new Error(`Thiếu AccountName/Remark của ${e.student.name}.`);
     rows.push([
-      accountNumber,bank,bankBin,num(e.item.amount),accountName,remark,
+      accountNumber,bank,bankBin,balanceOnly?e.remaining:num(e.item.amount),accountName,remark,
       e.student.className||'',e.student.externalCode||e.student.code||'',qrFileDate(e.student.birthDate),
       e.feeName||'',e.student.name||''
     ]);
-    if(e.paid&&e.item.qrAccountNumber&&slug(e.item.qrAccountNumber)!==slug(accountNumber))throw new Error('Khoản '+e.feeName+' của '+e.student.name+' đã ghi nhận thanh toán; không thể đổi tài khoản định danh.');
+    if(balanceOnly)continue; // Never alter account identifiers when updating QR remaining balance.
+    if(e.remaining<num(e.item.amount)&&e.item.qrAccountNumber&&slug(e.item.qrAccountNumber)!==slug(accountNumber))throw new Error('Khoản '+e.feeName+' của '+e.student.name+' đã phát sinh thanh toán; không thể đổi tài khoản định danh.');
     if(slug(e.item.qrAccountNumber)!==slug(accountNumber)||(tvIsMonthlyFee(e.feeShort,e.feeName)&&!e.item.periodId)){
       if(!changes.has(e.student.code))changes.set(e.student.code,new Map());
       changes.get(e.student.code).set(e.item.id,{accountNumber,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
     }
   }
-  if(validateOnly)return {rows,changes};
+  if(!rows.length)throw new Error('Không có khoản còn thiếu đã có tài khoản định danh. Xuất QR định danh lần đầu trước.');
+  if(validateOnly||balanceOnly)return {rows,changes};
   if(changes.size){
     const updated=students.map(s=>{
       const m=changes.get(s.code);if(!m)return s;
@@ -1342,9 +1408,9 @@ async function validateQrFileExport(){
   $('#qrFileStatus').textContent=`Hợp lệ: ${out.rows.length} dòng · ${new Set(out.rows.map(r=>r[0])).size} AccountNumber duy nhất · đúng 11 cột mẫu.`;
   toast(`Đã kiểm tra ${out.rows.length} dòng file QR.`);
 }
-async function exportQrFileXlsx(){
+async function exportQrFileXlsx(balanceOnly=false){
   if(typeof JSZip==='undefined')throw new Error('Thiếu thư viện xuất Excel. Hãy tải lại trang.');
-  const out=await qrFileRows(false),rows=out.rows;
+  const out=await qrFileRows(false,balanceOnly),rows=out.rows;
   const headers=['AccountNumber','Bank','BankBin','Amount','AccountName','Remark','Class','StudentID','Ngày sinh','Khoản Thu','Họ tên'];
   const zip=new JSZip();
   zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
@@ -1357,8 +1423,8 @@ async function exportQrFileXlsx(){
   const blankSheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t></t></is></c></row></sheetData></worksheet>';
   const sheets=zip.folder('xl').folder('worksheets');sheets.file('sheet1.xml',sheet1);sheets.file('sheet2.xml',blankSheet);sheets.file('sheet3.xml',blankSheet);
   const blob=await zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`File_tao_QR_dinh_danh_${new Date().toISOString().slice(0,10)}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
-  $('#qrFileStatus').textContent=`Đã xuất ${rows.length} dòng theo đúng 11 cột mẫu Test 6E.xlsx.`;
+  const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`File_tao_QR_${balanceOnly?'SO_DU_CON_THIEU_':'dinh_danh_'}${new Date().toISOString().slice(0,10)}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1200);
+  $('#qrFileStatus').textContent=`Đã xuất ${rows.length} dòng theo đúng 11 cột. ${balanceOnly?'Chỉ xuất số dư còn thiếu và giữ nguyên tài khoản định danh.':'File QR định danh'}`;
   await refresh();toast(`Đã xuất ${rows.length} dòng tạo QR.`);
 }
 async function renderFeeSetup(students){
@@ -2226,12 +2292,13 @@ async function exportClassFeeReport(){
       const items=studentDueItems(student).filter(item=>itemMatchesFeeFilter(item,filter));
       const itemIds=new Set(items.map(item=>item.id));
       const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&transactionMatchedItemIds(t).some(id=>itemIds.has(id)));
-      const paidKeys=new Set(valid.flatMap(transactionMatchedItemIds));
+      const amounts=paidAmountsByItem(valid,[student]);
       for(const item of items){
-        const isPaid=paidKeys.has(item.id);
-        const txn=valid.find(t=>transactionMatchesItem(t,item.id));
-        dueItems++;due+=item.amount;if(isPaid){paidItems++;paid+=item.amount;}
-        details.push([className,student.classStudentCode||'',student.code,student.name,item.name,item.feeCode||item.category||'',item.paymentCode||'',item.amount,isPaid?'Đã thu':'Chưa thu',isPaid?item.amount:0,isPaid?0:item.amount,txn?.date||'',txn?.ref||'']);
+        const itemPaid=Math.min(item.amount,amounts.get(`${student.code}|${item.id}`)||0);
+        const fullyPaid=itemPaid>=item.amount;
+        const related=valid.filter(t=>transactionMatchesItem(t,item.id));
+        dueItems++;due+=item.amount;paid+=itemPaid;if(fullyPaid)paidItems++;
+        details.push([className,student.classStudentCode||'',student.code,student.name,item.name,item.feeCode||item.category||'',item.paymentCode||'',item.amount,fullyPaid?'Đã thu đủ':itemPaid>0?'Đã thu một phần':'Chưa thu',itemPaid,Math.max(0,item.amount-itemPaid),related.map(x=>x.date||'').join('; '),related.map(x=>x.ref||'').join('; ')]);
       }
     }
     summary.push([className,classStudents.length,dueItems,paidItems,dueItems-paidItems,due,paid,Math.max(0,due-paid),due?paid/due:0]);
@@ -2527,6 +2594,7 @@ function wire() {
   $('#qrFileOnlyUnpaid').addEventListener('change',async()=>{const [students,stored,catalog]=await Promise.all([all('students'),all('transactions'),getFeeCatalog()]);updateQrFilePreview(students,catalog,reconcileTransactions(students,stored));});
   $('#qrFileValidate').onclick=()=>validateQrFileExport().catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'File QR chưa hợp lệ.';toast(e.message||'File QR chưa hợp lệ.',true);});
   $('#qrFileExport').onclick=()=>exportQrFileXlsx().catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'Không xuất được file QR.';toast(e.message||'Không xuất được file QR.',true);});
+  $('#qrFileRemainingExport').onclick=()=>exportQrFileXlsx(true).catch(e=>{console.error(e);$('#qrFileStatus').textContent=e.message||'Không xuất được số dư QR.';toast(e.message||'Không xuất được số dư QR.',true);});
   const rerenderCashSession=async()=>{const [students,stored]=await Promise.all([all('students'),all('transactions')]);await renderCashSession(students,reconcileTransactions(students,stored));};
   $('#cashSessionClass').addEventListener('change',async()=>{const draft=await getCashSessionDraft();draft.className=$('#cashSessionClass').value;await saveCashSessionDraft(draft);await rerenderCashSession();});
   $('#cashSessionSearch').addEventListener('input',rerenderCashSession);
@@ -2591,16 +2659,16 @@ document.addEventListener('DOMContentLoaded',async()=>{
 async function exportParentPreview(){
   const [students,rawTransactions,qrConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount')]);
   const reconciled=reconcileTransactions(students,rawTransactions);
-  const paidKeys=new Set(reconciled.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByItem=paidAmountsByItem(reconciled,students);
   const records=students.filter(s=>s.status!=='inactive').map(s=>({
     student_id:String(s.code||''),name:String(s.name||''),class_name:String(s.className||''),birth_date:String(s.birthDate||''),
     charges:studentDueItems(s).filter(i=>!i.legacy&&i.amount>0).map(i=>{
-      const paid=paidKeys.has(`${s.code}|${i.id}`);
       const amount=Number(i.amount)||0;
+      const paid=Math.min(amount,paidByItem.get(`${s.code}|${i.id}`)||0);
       const paymentRef=String(i.qrAccountNumber||i.paymentCode||'');
-      const qrReady=!paid&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
-      const payload=qrReady?buildVietQrPayload(qrConfig,amount,paymentRef):null;
-      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid:paid?amount:0,remaining:paid?0:amount,payment_reference:paymentRef,qr_payload:payload};
+      const qrReady=paid<amount&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
+      const payload=qrReady?buildVietQrPayload(qrConfig,amount-paid,paymentRef):null;
+      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid,remaining:Math.max(0,amount-paid),payment_reference:paymentRef,qr_payload:payload};
     })
   }));
   const draft={schema:'school-parent-sync-draft/1',school_id:'TRUNGVUONG',school_name:'TRƯỜNG TRƯNG VƯƠNG',generated_at:new Date().toISOString(),status:'OFFLINE_DRAFT_NOT_APPROVED',students:records};
