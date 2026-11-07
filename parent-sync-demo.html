@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Thử nghiệm bản nháp giao dịch – Trưng Vương</title>
+<style>
+  :root {color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#123d3d}
+  body{background:#eef6f4;margin:0;padding:22px}
+  main{max-width:780px;margin:0 auto;background:#fff;border-radius:18px;border:1px solid #cde0db;padding:28px}
+  h1{font-size:25px;margin-top:0}
+  h2{font-size:19px}
+  .notice{padding:14px 16px;background:#fff1d5;border-radius:9px;line-height:1.5}
+  .step{margin:24px 0;border-top:1px solid #dcebe7;padding-top:18px}
+  label{display:block;font-weight:650;margin:12px 0 7px}
+  input,select{box-sizing:border-box;width:100%;font:inherit;border:1px solid #aac9c3;border-radius:9px;padding:11px;background:#fff}
+  button{font:inherit;font-weight:650;border:0;border-radius:9px;background:#08776c;color:#fff;padding:12px 17px;cursor:pointer;margin-top:13px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .muted{color:#59726e;font-size:14px;line-height:1.5}
+  .error{color:#a62222;font-weight:650}
+  pre{background:#edf6f3;padding:15px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:9px}
+  a{color:#08776c}
+</style>
+</head>
+<body>
+<main>
+  <h1>Thử nghiệm đồng bộ giao dịch Trưng Vương</h1>
+  <p class="notice"><strong>Công cụ kiểm thử riêng, không phải phần thu tiền thật.</strong> Công cụ chỉ đọc bảng tham chiếu 60 khoản thu giả lập đã tải từ Cloudflare; không tự gửi dữ liệu đi. Một giao dịch thử sẽ được xuất thành JSON để duyệt trên cổng phụ huynh. Không dùng dữ liệu học sinh thật.</p>
+  <p><a href="./">Về web quản lý trường Trưng Vương</a></p>
+  <section class="step">
+    <h2>1. Chuẩn bị bảng tham chiếu</h2>
+    <p><a href="https://school-parent-dev.tuananh0001.workers.dev/admin/charge-map" target="_blank" rel="noopener noreferrer">Tải file TRUNGVUONG_PORTAL_CHARGE_REFERENCE_PRIVATE.json từ Cloudflare Access</a></p>
+    <label for="reference">Chọn file tham chiếu vừa tải</label>
+    <input type="file" id="reference" accept=".json,application/json">
+    <p class="muted">Không chọn file TRUNGVUONG_PARENT_DRAFT_...json. File đó là danh sách học sinh và khoản phải thu, không chứa giao dịch đã nộp.</p>
+  </section>
+  <section class="step">
+    <h2>2. Tạo một giao dịch giả lập</h2>
+    <label for="charge">Học sinh và món thu</label>
+    <select id="charge" disabled><option>Hãy chọn file tham chiếu ở bước 1</option></select>
+    <label for="amount">Số tiền nộp thử (VNĐ)</label>
+    <input id="amount" type="number" min="1" max="10000000" step="1" value="100000" disabled>
+    <label for="paidAt">Thời điểm ghi nhận giả lập</label>
+    <input id="paidAt" type="datetime-local" disabled>
+    <button type="button" id="make" disabled>Kiểm tra và tải bản nháp giao dịch JSON</button>
+    <p id="feedback" role="status"></p>
+    <pre id="summary" hidden></pre>
+  </section>
+  <section class="step">
+    <h2>3. Duyệt lô trên Cloudflare</h2>
+    <p>Sau khi đã tải file <code>TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_...json</code>, mở trang duyệt lô, chọn đúng file vừa tạo, đọc kết quả <code>PREVIEW</code>, rồi mới quyết định ghi dữ liệu giả lập.</p>
+    <p><a href="https://school-parent-dev.tuananh0001.workers.dev/admin/payment-import" target="_blank" rel="noopener noreferrer">Mở trang kiểm tra và duyệt lô (Cloudflare Access)</a></p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const get = id => document.getElementById(id);
+  const refInput=get('reference'), charge=get('charge'), amount=get('amount'), date=get('paidAt'), button=get('make'), feedback=get('feedback'), summary=get('summary');
+  let charges=[];
+  const showError=message=>{feedback.textContent=message;feedback.className='error';summary.hidden=true};
+  const today=new Date();
+  date.value=new Date(today.getTime()-today.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  function validReference(obj){
+    if(obj?.schema!=='parent-portal-charge-reference/1'||obj.school_id!=='TRUNGVUONG'||obj.mode!=='demo_only'||obj.count!==60||!Array.isArray(obj.charges)||obj.charges.length!==60)throw Error('Không đúng bảng tham chiếu 60 khoản thu thử nghiệm từ Cloudflare.');
+    const ids=new Set();
+    for(const item of obj.charges){
+      if(!/^tv_charge_[a-z0-9]{16,40}$/.test(String(item.portal_charge_id||''))||ids.has(item.portal_charge_id)||!Number.isSafeInteger(item.amount_due)||item.amount_due<=0||!item.student_name||!item.class_name||!item.period_label)throw Error('Bảng tham chiếu không hợp lệ hoặc có khoản thu trùng.');
+      ids.add(item.portal_charge_id);
+    }
+    return obj.charges;
+  }
+  refInput.addEventListener('change',async()=>{
+    charge.disabled=amount.disabled=date.disabled=button.disabled=true;
+    charge.replaceChildren(new Option('Chọn file tham chiếu trước', ''));
+    charges=[];
+    if(!refInput.files?.length)return;
+    try{
+      const file=refInput.files[0];
+      if(file.size>200000)throw Error('File tham chiếu quá lớn so với bộ dữ liệu thử nghiệm.');
+      const obj=JSON.parse(await file.text());
+      charges=validReference(obj);
+      charge.replaceChildren(...charges.map(x=>new Option(x.class_name+' – '+x.student_name+' | '+x.period_label+' – '+x.charge_name+' | '+Number(x.amount_due).toLocaleString('vi-VN')+'đ',x.portal_charge_id)));
+      charge.disabled=amount.disabled=date.disabled=button.disabled=false;
+      feedback.className='muted';
+      feedback.textContent='Đã nhận đúng bảng tham chiếu 60 khoản giả lập. Hãy chọn một học sinh chưa được ghi nhận đủ món thu.';
+    }catch(e){showError(e.message)}
+  });
+  button.addEventListener('click',()=>{
+    try{
+      const selected=charges.find(x=>x.portal_charge_id===charge.value);
+      const value=Number(amount.value);
+      if(!selected)throw Error('Chưa chọn khoản thu.');
+      if(!Number.isSafeInteger(value)||value<=0||value>Number(selected.amount_due))throw Error('Số tiền phải lớn hơn 0 và không vượt quá giá trị món thu. D1 cũng kiểm tra số còn thiếu.');
+      const dt=new Date(date.value);
+      if(!date.value||!Number.isFinite(dt.valueOf()))throw Error('Ngày giờ ghi nhận không hợp lệ.');
+      const rand=Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+      const reference='DEMO-TV-PORTAL-'+rand;
+      const payment={source_ref:reference,charge_id:selected.portal_charge_id,school_student_id:'',student_name:String(selected.student_name),class_name:String(selected.class_name),period_id:String(selected.period_id||''),charge_name:String(selected.charge_name||''),amount:value,paid_at:dt.toISOString().replace(/\.\d{3}Z$/,'Z'),mapping_status:'MATCHED_EXACT_DEMO'};
+      const draft={schema:'school-parent-payments-draft/2',school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),summary:{matched:1,held:0,total_matched:value},payments:[payment],held:[]};
+      const blob=new Blob([JSON.stringify(draft,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;link.download='TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_DEMO_'+new Date().toISOString().slice(0,10)+'.json';
+      document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+      feedback.className='muted';
+      feedback.textContent='Đã tạo file bản nháp một giao dịch DEMO. Chưa gửi dữ liệu lên Cloudflare.';
+      summary.hidden=false;
+      summary.textContent='Học sinh: '+selected.student_name+' – '+selected.class_name+'\nMón thu: '+selected.charge_name+' ('+selected.period_label+')\nNộp thử: '+value.toLocaleString('vi-VN')+'đ\nMã giao dịch: '+reference+'\nTrạng thái: CHƯA GHI D1';
+    }catch(e){showError(e.message)}
+  });
+})();
+</script>
+</body>
+</html>
