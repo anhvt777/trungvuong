@@ -778,22 +778,29 @@ function reconcileTransactions(students, transactions) {
   });
 }
 // Count monetary allocations rather than treating any payment as full settlement.
-function paidAmountsByItem(transactions){
-  const out=new Map();
+function paidAmountsByItem(transactions,students=[]){
+  const out=new Map(),obligations=new Map();
+  for(const student of students)for(const item of studentDueItems(student))obligations.set(`${student.code}|${item.id}`,Number(item.amount));
   for(const tx of transactions){
     if(tx.paymentStatus!=='valid')continue;
-    const ids=transactionMatchedItemIds(tx);
-    if(ids.length!==1)continue; // Bundle needs explicit allocation before amount can be split.
-    const value=Number(tx.amount);
-    if(!Number.isSafeInteger(value)||value<=0)continue;
-    const key=`${tx.studentCode}|${ids[0]}`;
-    out.set(key,(out.get(key)||0)+value);
+    const ids=[...new Set(transactionMatchedItemIds(tx))],value=Number(tx.amount);
+    if(!Number.isSafeInteger(value)||value<=0||!ids.length)continue;
+    if(ids.length===1){
+      const key=`${tx.studentCode}|${ids[0]}`;
+      out.set(key,(out.get(key)||0)+value);
+      continue;
+    }
+    // A bundle is credited only when every full-item amount sums exactly to the transaction.
+    const keys=ids.map(id=>`${tx.studentCode}|${id}`),parts=keys.map(key=>obligations.get(key));
+    if(parts.some(amount=>!Number.isSafeInteger(amount)||amount<=0))continue;
+    if(parts.reduce((sum,amount)=>sum+amount,0)!==value)continue;
+    keys.forEach((key,i)=>out.set(key,(out.get(key)||0)+parts[i]));
   }
   return out;
 }
 function feeSummaries(students,transactions){
   const summaries=Object.fromEntries(FEES.map(f=>[f.key,{...f,due:0,paid:0,remain:0,dueItems:0,paidItems:0,pct:0}]));
-  const paidByStudent=new Map(),amounts=paidAmountsByItem(transactions);
+  const paidByStudent=new Map(),amounts=paidAmountsByItem(transactions,students);
   students.forEach(student=>{
     studentDueItems(student).forEach(item=>{
       const summary=summaries[item.category]||summaries.other;
@@ -819,7 +826,7 @@ function totals(students, transactions) {
 }
 function renderStudents(students, transactions) {
   const reconciled=transactions.some(t=>t.paymentStatus)?transactions:reconcileTransactions(students,transactions);
-  const paidByItem=paidAmountsByItem(reconciled);
+  const paidByItem=paidAmountsByItem(reconciled,students);
   const query=slug($('#studentSearch')?.value||''),statusFilter=$('#studentStatusFilter')?.value||'active';
   const filtered=students.filter(s=>{
     const warningCount=studentWarnings(s).length,isActive=s.status!=='inactive';
@@ -869,7 +876,7 @@ function renderClasses(students, transactions) {
       const dueItems=g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)));
       const due=dueItems.reduce((sum,item)=>sum+item.amount,0);
       const dueKeys=new Set(g.students.flatMap(s=>studentDueItems(s).filter(item=>itemMatchesFeeFilter(item,filter)).map(item=>`${s.code}|${item.id}`)));
-      const paidAmounts=paidAmountsByItem(classTransactions);
+      const paidAmounts=paidAmountsByItem(classTransactions,g.students);
       let paidItems=0,paid=0;
       for(const student of g.students)for(const item of studentDueItems(student)){
         if(!itemMatchesFeeFilter(item,filter))continue;
@@ -2262,7 +2269,7 @@ async function exportClassFeeReport(){
       const items=studentDueItems(student).filter(item=>itemMatchesFeeFilter(item,filter));
       const itemIds=new Set(items.map(item=>item.id));
       const valid=transactions.filter(t=>t.studentCode===student.code&&t.paymentStatus==='valid'&&transactionMatchedItemIds(t).some(id=>itemIds.has(id)));
-      const amounts=paidAmountsByItem(valid);
+      const amounts=paidAmountsByItem(valid,[student]);
       for(const item of items){
         const itemPaid=Math.min(item.amount,amounts.get(`${student.code}|${item.id}`)||0);
         const fullyPaid=itemPaid>=item.amount;
@@ -2628,7 +2635,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
 async function exportParentPreview(){
   const [students,rawTransactions,qrConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount')]);
   const reconciled=reconcileTransactions(students,rawTransactions);
-  const paidByItem=paidAmountsByItem(reconciled);
+  const paidByItem=paidAmountsByItem(reconciled,students);
   const records=students.filter(s=>s.status!=='inactive').map(s=>({
     student_id:String(s.code||''),name:String(s.name||''),class_name:String(s.className||''),birth_date:String(s.birthDate||''),
     charges:studentDueItems(s).filter(i=>!i.legacy&&i.amount>0).map(i=>{
