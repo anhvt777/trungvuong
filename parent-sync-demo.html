@@ -44,6 +44,7 @@
     <label for="paidAt">Thời điểm ghi nhận giả lập</label>
     <input id="paidAt" type="datetime-local" disabled>
     <button type="button" id="make" disabled>Kiểm tra và tải bản nháp giao dịch JSON</button>
+    <button type="button" id="connect" disabled>Kết nối trực tiếp với cổng phụ huynh (DEMO)</button>
     <p id="feedback" role="status"></p>
     <pre id="summary" hidden></pre>
   </section>
@@ -57,7 +58,7 @@
 (() => {
   'use strict';
   const get = id => document.getElementById(id);
-  const refInput=get('reference'), charge=get('charge'), amount=get('amount'), date=get('paidAt'), button=get('make'), feedback=get('feedback'), summary=get('summary');
+  const refInput=get('reference'), charge=get('charge'), amount=get('amount'), date=get('paidAt'), button=get('make'), connect=get('connect'), feedback=get('feedback'), summary=get('summary');
   let charges=[];
   const showError=message=>{feedback.textContent=message;feedback.className='error';summary.hidden=true};
   const today=new Date();
@@ -72,7 +73,7 @@
     return obj.charges;
   }
   refInput.addEventListener('change',async()=>{
-    charge.disabled=amount.disabled=date.disabled=button.disabled=true;
+    charge.disabled=amount.disabled=date.disabled=button.disabled=connect.disabled=true;
     charge.replaceChildren(new Option('Chọn file tham chiếu trước', ''));
     charges=[];
     if(!refInput.files?.length)return;
@@ -82,33 +83,52 @@
       const obj=JSON.parse(await file.text());
       charges=validReference(obj);
       charge.replaceChildren(...charges.map(x=>new Option(x.class_name+' – '+x.student_name+' | '+x.period_label+' – '+x.charge_name+' | '+Number(x.amount_due).toLocaleString('vi-VN')+'đ',x.portal_charge_id)));
-      charge.disabled=amount.disabled=date.disabled=button.disabled=false;
+      charge.disabled=amount.disabled=date.disabled=button.disabled=connect.disabled=false;
       feedback.className='muted';
       feedback.textContent='Đã nhận đúng bảng tham chiếu 60 khoản giả lập. Hãy chọn một học sinh chưa được ghi nhận đủ món thu.';
     }catch(e){showError(e.message)}
   });
+  function makeDraft(){
+    const selected=charges.find(x=>x.portal_charge_id===charge.value);
+    const value=Number(amount.value);
+    if(!selected)throw Error('Chưa chọn khoản thu.');
+    if(!Number.isSafeInteger(value)||value<=0||value>Number(selected.amount_due))throw Error('Số tiền phải lớn hơn 0 và không vượt giá trị món thu. D1 vẫn kiểm tra số còn thiếu.');
+    const dt=new Date(date.value);
+    if(!date.value||!Number.isFinite(dt.valueOf()))throw Error('Thời gian không hợp lệ.');
+    const rand=Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+    const source_ref='DEMO-TV-PORTAL-'+rand;
+    const payment={source_ref,charge_id:selected.portal_charge_id,school_student_id:'',student_name:String(selected.student_name),class_name:String(selected.class_name),period_id:String(selected.period_id||''),charge_name:String(selected.charge_name||''),amount:value,paid_at:dt.toISOString().replace(/\\.\\d{3}Z$/,'Z'),mapping_status:'MATCHED_EXACT_DEMO'};
+    return {schema:'school-parent-payments-draft/2',school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),summary:{matched:1,held:0,total_matched:value},payments:[payment],held:[]};
+  }
   button.addEventListener('click',()=>{
     try{
-      const selected=charges.find(x=>x.portal_charge_id===charge.value);
-      const value=Number(amount.value);
-      if(!selected)throw Error('Chưa chọn khoản thu.');
-      if(!Number.isSafeInteger(value)||value<=0||value>Number(selected.amount_due))throw Error('Số tiền phải lớn hơn 0 và không vượt quá giá trị món thu. D1 cũng kiểm tra số còn thiếu.');
-      const dt=new Date(date.value);
-      if(!date.value||!Number.isFinite(dt.valueOf()))throw Error('Ngày giờ ghi nhận không hợp lệ.');
-      const rand=Array.from(crypto.getRandomValues(new Uint8Array(10)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
-      const reference='DEMO-TV-PORTAL-'+rand;
-      const payment={source_ref:reference,charge_id:selected.portal_charge_id,school_student_id:'',student_name:String(selected.student_name),class_name:String(selected.class_name),period_id:String(selected.period_id||''),charge_name:String(selected.charge_name||''),amount:value,paid_at:dt.toISOString().replace(/\.\d{3}Z$/,'Z'),mapping_status:'MATCHED_EXACT_DEMO'};
-      const draft={schema:'school-parent-payments-draft/2',school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),summary:{matched:1,held:0,total_matched:value},payments:[payment],held:[]};
+      const draft=makeDraft();
       const blob=new Blob([JSON.stringify(draft,null,2)],{type:'application/json'});
       const url=URL.createObjectURL(blob);
       const link=document.createElement('a');
       link.href=url;link.download='TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_DEMO_'+new Date().toISOString().slice(0,10)+'.json';
       document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-      feedback.className='muted';
-      feedback.textContent='Đã tạo file bản nháp một giao dịch DEMO. Chưa gửi dữ liệu lên Cloudflare.';
+      feedback.className='muted';feedback.textContent='Đã tải bản nháp DEMO. Chưa ghi vào D1.';
       summary.hidden=false;
-      summary.textContent='Học sinh: '+selected.student_name+' – '+selected.class_name+'\nMón thu: '+selected.charge_name+' ('+selected.period_label+')\nNộp thử: '+value.toLocaleString('vi-VN')+'đ\nMã giao dịch: '+reference+'\nTrạng thái: CHƯA GHI D1';
+      summary.textContent='Mã giao dịch: '+draft.payments[0].source_ref+'\\nSố tiền: '+draft.payments[0].amount.toLocaleString('vi-VN')+'đ\\nTrạng thái: chưa ghi D1';
     }catch(e){showError(e.message)}
+  });
+  connect.addEventListener('click',()=>{
+    // Must open synchronously from click to prevent browser popup blocking.
+    const popup=window.open('https://school-parent-dev.tuananh0001.workers.dev/admin/live-bridge','tvParentPortalDemoBridge');
+    if(!popup){showError('Trình duyệt đã chặn cửa sổ. Hãy cho phép popup rồi thử lại.');return}
+    let draft;
+    try{draft=makeDraft()}catch(err){showError(err.message);popup.close();return}
+    const portOrigin='https://school-parent-dev.tuananh0001.workers.dev';
+    const listener=(event)=>{
+      if(event.origin!==portOrigin||event.source!==popup||event.data?.type!=='TV_PORTAL_READY'||!/^([a-f0-9]{40})$/.test(event.data.challenge||''))return;
+      window.removeEventListener('message',listener);
+      popup.postMessage({type:'TV_PORTAL_DRAFT',challenge:event.data.challenge,draft},portOrigin);
+      feedback.className='muted';
+      feedback.textContent='Đã chuyển bản nháp DEMO sang trang Cloudflare Access. Hãy xem trước và xác nhận tại cửa sổ mới; chưa ghi tự động.';
+    };
+    window.addEventListener('message',listener);
+    feedback.className='muted';feedback.textContent='Đang mở Cloudflare Access. Nếu được yêu cầu, hãy đăng nhập để tiếp tục.';
   });
 })();
 </script>
