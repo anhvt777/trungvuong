@@ -35,3 +35,32 @@ Nhánh: `feature/parent-payment-sync-preview-20261107`. **Không thay đổi `ma
 ## Trạng thái
 
 **Chưa tích hợp đồng bộ trực tiếp, chưa merge vào main, chưa thay đổi QR.**
+
+
+## Duyệt lô trên Cloudflare (bổ sung V1.4)
+
+- URL quản trị: `https://school-parent-dev.tuananh0001.workers.dev/admin/payment-import`
+- Chọn JSON schema `school-parent-payments-draft/2` xuất từ nhánh thử nghiệm.
+- Worker kiểm tra định dạng, quyền truy cập, từng `charge_id`, mã giao dịch đã tồn tại và số tiền còn thiếu trên D1.
+- Trước khi ghi, trang yêu cầu duyệt lại số giao dịch mới và tổng tiền, ký HMAC phía server có hạn dùng 10 phút.
+- Chỉ tải lô 1–30 giao dịch *giả lập*. Giao dịch ngân hàng thật và thông tin học sinh thật bị cấm trong môi trường demo.
+- Hai giao dịch cùng khoản thu trong cùng một lô vẫn bị chặn. Có thể thử ở **hai lô riêng**; không gửi lặp những giao dịch cũ.
+- Phản hồi `ALREADY_SYNCED` có nghĩa toàn bộ giao dịch hợp lệ trong lô đã tồn tại.
+- Không lưu file đã xuất trong repository.
+
+## Kiểm thử logic đã chạy
+
+| Kịch bản | Kết quả |
+| --- | --- |
+| Ánh xạ giao dịch một phần (100.000/683.100) | Khớp đúng khoản |
+| Ngày giao dịch không có múi giờ | Đưa vào held |
+| Mã khoản thu trên máy không tồn tại | Đưa vào held |
+| Mã giao dịch trùng | Chỉ cho phép một giao dịch vào bản nháp |
+| Giao dịch gộp nhiều món | Đưa vào held |
+| Trùng ứng viên khoản thu trên D1 | Đưa vào held |
+
+Các kiểm thử trên là **kiểm thử logic bằng dữ liệu mẫu trong bộ chạy script**, không thay thế cho kiểm thử nhập/lưu qua trình duyệt trên môi trường thật. Việc ghi một lô mới qua `/admin/payment-import` vẫn chưa được kiểm thử đầu-cuối.
+
+## Tiêu chí phát hành
+
+Chỉ hợp nhất vào `main` sau khi xác nhận ánh xạ ID không đổi qua kỳ thu, cơ chế nhiều lần nộp, nguồn mã giao dịch, thời gian thu thực tế, rollback và xử lý khi mất mạng. Không bật import giao dịch thật vào Worker demo.
