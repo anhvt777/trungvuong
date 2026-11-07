@@ -1,76 +1,89 @@
-/* Parent Portal payment reconciliation preview.
-   Runs only when a school operator clicks the export button.
-   No HTTP requests, no tokens, no direct Cloudflare mutation.
-   Source transactions remain in local IndexedDB. */
+/* Parent Portal staging only. No remote writes. All input is processed in the browser. */
 (function () {
   'use strict';
-  const SCHEMA = 'school-parent-payments-draft/1';
-  function makeSafeRef(tx) {
-    const raw = String(tx.ref || tx.bankTransactionId || tx.transactionId || tx.id || '').trim();
-    const normalized = raw.toUpperCase().replace(/[^A-Z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
-    return normalized ? 'DEMO-TV-' + normalized : '';
+  const SCHEMA = 'school-parent-payments-draft/2';
+  const plain = x => String(x ?? '').trim();
+  const norm = x => plain(x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  function dobISO(value) {
+    const v = plain(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const match = /^(\d{2})[\/-](\d{2})[\/-](\d{4})$/.exec(v);
+    return match ? match[3]+'-'+match[2]+'-'+match[1] : '';
   }
-  async function exportParentPaymentsPreview() {
-    const status = document.querySelector('#parentPaymentsExportStatus');
+  function periodKey(value) {
+    const s = norm(value);
+    let m = /(?:^|\D)(20\d{2})[ -](0?[1-9]|1[0-2])(?:$|\D)/.exec(s);
+    if (m) return m[1]+'-'+m[2].padStart(2,'0');
+    m = /(?:^|\D)(0?[1-9]|1[0-2])[ -](20\d{2})(?:$|\D)/.exec(s);
+    if (m) return m[2]+'-'+m[1].padStart(2,'0');
+    m = /(20\d{2})[ -](20\d{2})/.exec(s);
+    return m ? m[1]+'-'+m[2] : '';
+  }
+  function feeKey(value) {
+    let s = norm(value);
+    if (/^(bh|bao hiem) y te(?: bhyt)?$/.test(s)) return 'BHYT';
+    if (/^(bh|bao hiem) than the(?: bhtt)?$/.test(s)) return 'BHTT';
+    s = s.replace(/ thang (0?[1-9]|1[0-2])(?: 20\d{2})?$/, '');
+    return s;
+  }
+  const identity = (name,cls,dob) => [norm(name),norm(cls),dobISO(dob)].join('|');
+  function refKey(t) {
+    const src = plain(t.ref || t.bankTransactionId || t.transactionId || t.id);
+    const clean = src.toUpperCase().replace(/[^A-Z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,60);
+    return clean ? 'DEMO-TV-'+clean : '';
+  }
+  const hold = (held,why,t) => held.push({reason:why,source_ref:refKey(t),amount:Number(t.amount)||0});
+  async function exportPreview() {
+    const status=document.querySelector('#parentPaymentsExportStatus');
+    const input=document.querySelector('#parentChargeReference');
     try {
-      const [students, stored] = await Promise.all([all('students'), all('transactions')]);
-      const activeStudents = new Map(students.filter(s => s.status !== 'inactive').map(s => [String(s.code), s]));
-      const resolved = reconcileTransactions(students, stored);
-      const proposed = [], held = [], refs = new Set();
-      for (const t of resolved) {
-        if (t.paymentStatus !== 'valid') {
-          if (t.amount > 0) held.push({ reason: 'NOT_CONFIRMED_OR_UNMATCHED', source: String(t.sourceType || ''), amount: Number(t.amount) || 0 });
-          continue;
-        }
-        const student = activeStudents.get(String(t.studentCode || ''));
-        const matched = transactionMatchedItemIds(t);
-        const ref = makeSafeRef(t);
-        const amount = Number(t.amount);
-        const date = String(t.date || t.paidAt || '').trim();
-        // Do not silently allocate one bank transfer over multiple items.
-        if (!student || matched.length !== 1 || !ref || !Number.isSafeInteger(amount) || amount <= 0) {
-          held.push({ reason: 'REQUIRES_MANUAL_ALLOCATION', amount: amount || 0 });
-          continue;
-        }
-        const item = studentDueItems(student).find(x => x.id === matched[0]);
-        if (!item || item.legacy || amount > Number(item.amount) || refs.has(ref)) {
-          held.push({ reason: 'INVALID_OR_DUPLICATE_REFERENCE', reference: ref, amount });
-          continue;
-        }
-        refs.add(ref);
-        proposed.push({
-          source_ref: ref,
-          school_student_id: String(student.code),
-          student_name: String(student.name || ''),
-          class_name: String(student.className || ''),
-          school_charge_id: String(item.id),
-          charge_name: String(item.name || ''),
-          period_id: String(item.periodId || item.period || ''),
-          amount,
-          paid_at_source: date,
-          source_type: String(t.sourceType || ''),
-          mapping_status: 'PENDING_PARENT_PORTAL_CHARGE_MAPPING'
-        });
+      if (!input?.files?.length) throw Error('Chưa chọn bảng tham chiếu D1 riêng tư.');
+      const reference=JSON.parse(await input.files[0].text());
+      if (reference.schema!=='parent-portal-charge-reference/1'||reference.school_id!=='TRUNGVUONG'||reference.mode!=='demo_only'||reference.count!==60||!Array.isArray(reference.charges)||reference.charges.length!==60) throw Error('Bảng tham chiếu không hợp lệ hoặc không phải bộ 60 khoản giả lập.');
+      const map=new Map(),usedPortalIds=new Set();
+      for(const x of reference.charges) {
+        if (!/^tv_charge_[a-z0-9]{16,40}$/.test(plain(x.portal_charge_id)) || !plain(x.student_name) || !plain(x.birth_date) || !plain(x.class_name) || !Number.isSafeInteger(x.amount_due) || x.amount_due<=0) throw Error('Bảng tham chiếu chứa dữ liệu không hợp lệ.');
+        if(usedPortalIds.has(x.portal_charge_id))throw Error('Trùng portal_charge_id trong bảng tham chiếu.');
+        usedPortalIds.add(x.portal_charge_id);
+        const key=[identity(x.student_name,x.class_name,x.birth_date),periodKey(x.period_id)||periodKey(x.period_label),feeKey(x.charge_name),x.amount_due].join('|');
+        if(!map.has(key))map.set(key,[]);
+        map.get(key).push(x);
       }
-      const draft = {
-        schema: SCHEMA,
-        school_id: 'TRUNGVUONG',
-        status: 'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',
-        generated_at: new Date().toISOString(),
-        summary: { matched: proposed.length, held: held.length, amount: proposed.reduce((a,b) => a + b.amount, 0) },
-        payments: proposed,
-        held
-      };
-      const filename = 'TRUNGVUONG_PAYMENTS_PREVIEW_' + new Date().toISOString().slice(0,10) + '.json';
-      download(filename, JSON.stringify(draft, null, 2), 'application/json;charset=utf-8');
-      if (status) status.textContent = 'Đã tạo bản nháp: ' + proposed.length + ' giao dịch đủ điều kiện sơ bộ, ' + held.length + ' giao dịch cần kiểm tra. Chưa đồng bộ lên Cloudflare. Cần đối chiếu mã món thu trước khi công bố.';
-    } catch (err) {
-      console.error('Parent payments preview', err);
-      if (status) status.textContent = 'Không thể xuất bản nháp đối chiếu. Vui lòng kiểm tra dữ liệu local.';
+      const [students,rawTransactions]=await Promise.all([all('students'),all('transactions')]);
+      const active=new Map(students.filter(s=>s.status!=='inactive').map(s=>[plain(s.code),s]));
+      const resolved=reconcileTransactions(students,rawTransactions);
+      const payments=[],held=[],refs=new Set();
+      for(const t of resolved) {
+        const amount=Number(t.amount);
+        if(t.paymentStatus!=='valid'){if(amount>0)hold(held,'NOT_CONFIRMED_OR_UNMATCHED',t);continue;}
+        const student=active.get(plain(t.studentCode));
+        const ids=transactionMatchedItemIds(t);
+        if(!student||ids.length!==1||!Number.isSafeInteger(amount)||amount<=0){hold(held,'MANUAL_REVIEW_REQUIRED',t);continue;}
+        const item=studentDueItems(student).find(x=>plain(x.id)===plain(ids[0]));
+        if(!item||item.legacy||!Number.isSafeInteger(Number(item.amount))||Number(item.amount)<amount){hold(held,'INVALID_SCHOOL_CHARGE_OR_AMOUNT',t);continue;}
+        const period=periodKey(item.periodId || item.period);
+        const key=[identity(student.name,student.className,student.birthDate),period,feeKey(item.name),Number(item.amount)].join('|');
+        const matches=map.get(key)||[];
+        if(!period||matches.length!==1){hold(held,matches.length>1?'AMBIGUOUS_PORTAL_CHARGE':'NO_EXACT_PORTAL_MATCH',t);continue;}
+        const source_ref=refKey(t);
+        if(!source_ref||refs.has(source_ref)){hold(held,'MISSING_OR_DUPLICATE_REF',t);continue;}
+        refs.add(source_ref);
+        const paid_at_source=plain(t.date || t.paidAt);
+        // Do not guess ambiguous dates; require ISO with timezone to be eligible for API.
+        const dateOK=/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(paid_at_source)&&Number.isFinite(Date.parse(paid_at_source));
+        if(!dateOK){hold(held,'DATE_NEEDS_VERIFICATION',t);continue;}
+        payments.push({source_ref,charge_id:matches[0].portal_charge_id,school_charge_id:plain(item.id),school_student_id:plain(student.code),student_name:plain(student.name),class_name:plain(student.className),period_id:period,charge_name:plain(item.name),amount,paid_at:paid_at_source,mapping_status:'MATCHED_EXACT_DEMO'});
+      }
+      const draft={schema:SCHEMA,school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),reference_generated_at:reference.generated_at,summary:{matched:payments.length,held:held.length,total_matched:payments.reduce((a,b)=>a+b.amount,0)},payments,held};
+      const file='TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_'+new Date().toISOString().slice(0,10)+'.json';
+      download(file,JSON.stringify(draft,null,2),'application/json;charset=utf-8');
+      if(status)status.textContent='Đã đối chiếu chính xác '+payments.length+' giao dịch; '+held.length+' giao dịch cần xác minh. Bản nháp chưa được gửi Cloudflare. Không tải JSON lên GitHub.';
+    } catch(err) {
+      if(status)status.textContent='Chưa thể đối chiếu: '+err.message;
+      console.error('Parent payment mapping preview',err);
     }
   }
-  document.addEventListener('DOMContentLoaded', function () {
-    const btn = document.querySelector('#exportParentPaymentsPreview');
-    if (btn) btn.addEventListener('click', exportParentPaymentsPreview);
+  document.addEventListener('DOMContentLoaded',()=>{
+    document.querySelector('#exportParentPaymentsPreview')?.addEventListener('click',exportPreview);
   });
 })();
