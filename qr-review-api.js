@@ -16,6 +16,11 @@ async function reviewedQrApi(req,env){
  if([x.student_name,x.class_name,x.charge_name,x.account_name].some(v=>!v.trim()||v.length>120))return reply({error:'Invalid identity or charge'},422);
  if(x.bank_bin!=='970418'||!/^[A-Za-z0-9]{4,34}$/.test(x.account_number)||!/^[A-Za-z0-9 _.-]{1,95}$/.test(x.remark)||!Number.isSafeInteger(x.amount)||x.amount<=0||x.amount>10000000)return reply({error:'Invalid BIDV data'},422);
  if(!/^[A-Za-z0-9+/=]+$/.test(x.qr_png_base64)||x.qr_png_base64.length<100||x.qr_png_base64.length>=175000||!x.qr_png_base64.startsWith('iVBORw0KGgo'))return reply({error:'Invalid QR PNG'},422);
+ let png;try{png=atob(x.qr_png_base64)}catch{return reply({error:'Malformed QR PNG'},422)}
+ if(png.length<200||png.length>140000||png.slice(0,8)!=='\\x89PNG\\r\\n\\x1a\\n'||png.slice(12,16)!=='IHDR')return reply({error:'Not a valid PNG signature'},422);
+ const dimension=i=>((png.charCodeAt(i)*16777216)+(png.charCodeAt(i+1)*65536)+(png.charCodeAt(i+2)*256)+png.charCodeAt(i+3));
+ const w=dimension(16),h=dimension(20);
+ if(w<180||w>1200||h<180||h>1200)return reply({error:'Invalid QR image dimensions'},422);
  if(x.qr_payload.length>600||x.qr_payload!==qrBuildEmv(x))return reply({error:'EMV payload mismatch'},422);
  const rs=await env.DB.prepare("SELECT c.id,c.name,c.payment_reference,c.payment_account,c.amount_due,c.qr_verified,c.qr_amount,s.uid,s.display_name,s.class_name,p.label period_label,COALESCE(SUM(CASE WHEN pay.status='confirmed' THEN pa.amount ELSE 0 END),0) paid FROM charges c JOIN students s ON s.uid=c.student_uid JOIN billing_periods p ON p.id=c.period_id LEFT JOIN payment_allocations pa ON pa.charge_id=c.id LEFT JOIN payments pay ON pay.id=pa.payment_id WHERE s.school_id='TRUNGVUONG' AND s.uid LIKE 'tv_demo_%' AND c.published=1 AND (c.payment_reference=? OR c.payment_reference=?) GROUP BY c.id").bind(x.remark,x.account_number).all();
  const candidates=(rs.results||[]).filter(c=>qrTextNormalize(c.display_name)===qrTextNormalize(x.student_name)&&qrTextNormalize(c.class_name)===qrTextNormalize(x.class_name));
