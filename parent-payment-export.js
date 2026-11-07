@@ -104,6 +104,7 @@
       if(status)status.textContent='Đã gửi bản nháp '+draft.payments.length+' giao dịch tới trang quản trị. Cần kiểm tra và duyệt trên Cloudflare; không ghi tự động.';
     };
     window.addEventListener('message',listener);
+    popup.postMessage({type:'TV_PORTAL_HELLO'},PORTAL_ORIGIN);
     if(status)status.textContent='Đang mở Cloudflare Access. Đăng nhập tại cửa sổ mới để tiếp tục.';
   }
   document.addEventListener('DOMContentLoaded',()=>{
