@@ -719,7 +719,7 @@ function reconcileTransactions(students, transactions) {
   const reportIndexes=buildStudentReportIndexes(students);
   const claimed=new Set();
   // Manual transactions may pay one charge in installments; track value and stable transaction identity.
-  const manualTotals=new Map(),manualRefs=new Set();
+  const allocationTotals=new Map(),seenPaymentRefs=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
     const insuranceResult=reconcileInsuranceTransaction(t,byCode,claimed);
     if(insuranceResult)return insuranceResult;
@@ -738,13 +738,24 @@ function reconcileTransactions(students, transactions) {
       const key=`${student.code}|${item.id}`;
       const txnIdentity=String(t.ref||t.transactionId||t.id||'').trim();
       if(!txnIdentity)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'missing_transaction_id',feeCategory:item.category};
-      if(manualRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
-      const already=manualTotals.get(key)||0;
+      if(seenPaymentRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      const already=allocationTotals.get(key)||0;
       if(!Number.isSafeInteger(amount)||amount<=0||item.legacy||already+amount>item.amount||claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
-      manualRefs.add(txnIdentity);
-      manualTotals.set(key,already+amount);
+      seenPaymentRefs.add(txnIdentity);
+      allocationTotals.set(key,already+amount);
       if(already+amount===item.amount)claimed.add(key);
       return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'cash',partialPayment:already+amount<item.amount};
+    }
+    if(alias?.item&&!alias.item.legacy){
+      const item=alias.item,key=`${student.code}|${item.id}`,txnIdentity=String(t.ref||t.transactionId||t.id||'').trim();
+      if(!txnIdentity)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'missing_transaction_id',feeCategory:item.category};
+      if(seenPaymentRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      const already=allocationTotals.get(key)||0;
+      if(!Number.isSafeInteger(amount)||amount<=0||already+amount>item.amount||claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
+      seenPaymentRefs.add(txnIdentity);
+      allocationTotals.set(key,already+amount);
+      if(already+amount===item.amount)claimed.add(key);
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'transfer',matchedBy:'payment_code',partialPayment:already+amount<item.amount};
     }
     if(!alias){
       const bundle=noticeBundleForTransaction(t,student);
