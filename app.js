@@ -977,8 +977,13 @@ function buildVietQrPayload(config,amount,remark){
   payload+=crc16ccitt(payload);return payload;
 }
 function qrCandidates(students,transactions){
-  const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
-  return students.flatMap(student=>studentDueItems(student).filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0).map(item=>({student,item,paid:paid.has(`${student.code}|${item.id}`)})));
+  const allocated=paidAmountsByItem(transactions,students);
+  return students.flatMap(student=>studentDueItems(student)
+    .filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0)
+    .map(item=>{
+      const paidAmount=Math.min(item.amount,allocated.get(`${student.code}|${item.id}`)||0);
+      return {student,item,paid:paidAmount>=item.amount,paidAmount,remaining:Math.max(0,item.amount-paidAmount)};
+    }));
 }
 function renderQrPage(students,transactions,config){
   if(config){$('#qrBankBin').value=config.bin||'';$('#qrAccountNumber').value=config.accountNumber||'';$('#qrAccountName').value=config.accountName||'';$('#qrConfigStatus').textContent='Đã lưu trên thiết bị này';}
@@ -996,7 +1001,7 @@ async function saveQrConfig(){
   if(!config.accountName)return toast('Hãy nhập tên chủ tài khoản.',true);
   await request('meta','put',config);$('#qrAccountName').value=config.accountName;$('#qrConfigStatus').textContent='Đã lưu trên thiết bị này';toast('Đã lưu tài khoản nhận cục bộ.');
 }
-function qrFilename(entry){return `${slug(entry.student.className||'lop')}_${slug(entry.student.name)}_${slug(entry.student.code)}_${slug(entry.item.name)}.png`;}
+function qrFilename(entry){return `${slug(entry.student.className||'lop')}_${slug(entry.student.name)}_${slug(entry.student.code)}_${slug(entry.item.name)}_${entry.remaining}VND.png`;}
 function renderQrCards(entries){
   if(!entries.length){$('#qrPreviewGrid').innerHTML='<div class="panel qr-empty-state">Không có món phù hợp với điều kiện đã chọn.</div>';return;}
   $('#qrPreviewGrid').innerHTML=entries.map((entry,index)=>`<article class="panel qr-result-card"><div class="qr-result-top"><span class="category-badge ${entry.item.category==='service'?'service':''}">${escapeHTML(entry.item.name)}</span><span class="qr-class-tag">${escapeHTML(entry.student.className||'Chưa xếp lớp')}</span></div><div class="qr-person"><strong>${escapeHTML(entry.student.name)}</strong><small>${escapeHTML(entry.student.code)}</small></div><img src="${entry.png}" alt="Mã QR ${escapeHTML(entry.student.code)} ${escapeHTML(entry.item.name)}"><div class="qr-amount">${money(entry.item.amount)}</div><div class="qr-result-footer"><span>${escapeHTML(entry.remark)}</span><a class="button button-outline button-small" href="${entry.png}" download="${escapeHTML(entry.filename)}">Lưu PNG</a></div></article>`).join('');
@@ -1012,13 +1017,16 @@ async function generateQrs(){
   for(const entry of entries){
     const key=`${entry.student.code}|${entry.item.id}`;if(unique.has(key))continue;unique.add(key);
     const code=entry.item.category==='insurance'?'BHYT':entry.item.category==='mandatory'?'BHTT':qrText(entry.item.name,12).replace(/\s+/g,'');
-    const remark=qrText(entry.item.paymentCode||`${entry.student.code} ${code}`,25);const payload=buildVietQrPayload(config,entry.item.amount,remark);
+    const remark=qrText(entry.item.qrAccountNumber||entry.item.paymentCode||`${entry.student.code} ${code}`,25);
+    // Generate only the unpaid balance. Do not publish until account/QR has been verified by the school.
+    if(entry.remaining<=0)continue;
+    const payload=buildVietQrPayload(config,entry.remaining,remark);
     const holder=document.createElement('div');new QRCode(holder,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
     const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được ảnh QR trên trình duyệt này.');
     output.push({...entry,remark,filename:qrFilename(entry),png:canvas.toDataURL('image/png')});
   }
   renderQrCards(output);$('#qrSelectionCount').textContent=`${output.length} ảnh QR đã tạo`;
-  $('#qrPreviewSummary').textContent=`${output.length} mã, mỗi mã gắn với đúng một học sinh và một món thu.`;
+  $('#qrPreviewSummary').textContent=`${output.length} mã QR theo số dư còn thiếu (chưa đồng bộ lên cổng phụ huynh). Phải xác minh tài khoản và tiền còn thiếu trước khi công bố.`;
   const zip=new JSZip();for(const item of output)zip.folder(qrText(item.student.className||'Chua_xep_lop',30)||'Chua_xep_lop').file(item.filename,item.png.split(',')[1],{base64:true});
   $('#downloadQrs').onclick=async()=>{const blob=await zip.generateAsync({type:'blob'});download(`SchoolCollect_QR_${new Date().toISOString().slice(0,10)}.zip`,blob,'application/zip');};
   $('#downloadQrs').hidden=false;
@@ -2642,8 +2650,8 @@ async function exportParentPreview(){
       const amount=Number(i.amount)||0;
       const paid=Math.min(amount,paidByItem.get(`${s.code}|${i.id}`)||0);
       const paymentRef=String(i.qrAccountNumber||i.paymentCode||'');
-      const qrReady=paid===0&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
-      const payload=qrReady?buildVietQrPayload(qrConfig,amount,paymentRef):null;
+      const qrReady=paid<amount&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
+      const payload=qrReady?buildVietQrPayload(qrConfig,amount-paid,paymentRef):null;
       return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid,remaining:Math.max(0,amount-paid),payment_reference:paymentRef,qr_payload:payload};
     })
   }));
