@@ -718,6 +718,8 @@ function reconcileTransactions(students, transactions) {
   students.forEach(student=>studentDueItems(student).forEach(item=>{if(item.paymentCode)byPaymentCode.set(slug(item.paymentCode),{student,item});for(const alias of item.paymentCodeAliases||[])if(alias)byPaymentCode.set(slug(alias),{student,item});if(item.qrAccountNumber)byPaymentCode.set(slug(item.qrAccountNumber),{student,item});}));
   const reportIndexes=buildStudentReportIndexes(students);
   const claimed=new Set();
+  // Manual transactions may pay one charge in installments; track value and stable transaction identity.
+  const manualTotals=new Map(),manualRefs=new Set();
   return [...transactions].sort((a,b)=>(a.date||a.importedAt||'').localeCompare(b.date||b.importedAt||'')).map(t=>{
     const insuranceResult=reconcileInsuranceTransaction(t,byCode,claimed);
     if(insuranceResult)return insuranceResult;
@@ -733,11 +735,16 @@ function reconcileTransactions(students, transactions) {
     if(['cash','direct_school','manual_collection'].includes(t.sourceType)&&t.manualDueItemId){
       const item=studentItems.find(x=>x.id===t.manualDueItemId);
       if(!item)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'no_due',feeCategory:category};
-      if(item.amount!==amount)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
       const key=`${student.code}|${item.id}`;
-      if(claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
-      claimed.add(key);
-      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'cash'};
+      const txnIdentity=String(t.ref||t.transactionId||t.id||'').trim();
+      if(!txnIdentity)return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'missing_transaction_id',feeCategory:item.category};
+      if(manualRefs.has(txnIdentity))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'duplicate',feeCategory:item.category};
+      const already=manualTotals.get(key)||0;
+      if(!Number.isSafeInteger(amount)||amount<=0||item.legacy||already+amount>item.amount||claimed.has(key))return {...t,studentCode:student.code,studentName:student.name,matched:false,paymentStatus:'amount_mismatch',feeCategory:item.category};
+      manualRefs.add(txnIdentity);
+      manualTotals.set(key,already+amount);
+      if(already+amount===item.amount)claimed.add(key);
+      return {...t,studentCode:student.code,studentName:student.name,matched:true,paymentStatus:'valid',feeCategory:item.category,feeDetail:item.name,matchedDueItem:item.name,matchedDueItemId:item.id,matchedDueItemIds:[item.id],paymentChannel:t.paymentChannel||'cash',partialPayment:already+amount<item.amount};
     }
     if(!alias){
       const bundle=noticeBundleForTransaction(t,student);
@@ -2591,16 +2598,23 @@ document.addEventListener('DOMContentLoaded',async()=>{
 async function exportParentPreview(){
   const [students,rawTransactions,qrConfig]=await Promise.all([all('students'),all('transactions'),request('meta','get','qrAccount')]);
   const reconciled=reconcileTransactions(students,rawTransactions);
-  const paidKeys=new Set(reconciled.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
+  const paidByItem=new Map();
+  for(const t of reconciled.filter(t=>t.paymentStatus==='valid')){
+    const ids=transactionMatchedItemIds(t);
+    if(ids.length!==1)continue; // Multi-item bundles need separate exact allocations before posting.
+    const key=`${t.studentCode}|${ids[0]}`;
+    const amount=Number(t.amount);
+    if(Number.isSafeInteger(amount)&&amount>0)paidByItem.set(key,(paidByItem.get(key)||0)+amount);
+  }
   const records=students.filter(s=>s.status!=='inactive').map(s=>({
     student_id:String(s.code||''),name:String(s.name||''),class_name:String(s.className||''),birth_date:String(s.birthDate||''),
     charges:studentDueItems(s).filter(i=>!i.legacy&&i.amount>0).map(i=>{
-      const paid=paidKeys.has(`${s.code}|${i.id}`);
       const amount=Number(i.amount)||0;
+      const paid=Math.min(amount,paidByItem.get(`${s.code}|${i.id}`)||0);
       const paymentRef=String(i.qrAccountNumber||i.paymentCode||'');
-      const qrReady=!paid&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
+      const qrReady=paid===0&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
       const payload=qrReady?buildVietQrPayload(qrConfig,amount,paymentRef):null;
-      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid:paid?amount:0,remaining:paid?0:amount,payment_reference:paymentRef,qr_payload:payload};
+      return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid,remaining:Math.max(0,amount-paid),payment_reference:paymentRef,qr_payload:payload};
     })
   }));
   const draft={schema:'school-parent-sync-draft/1',school_id:'TRUNGVUONG',school_name:'TRƯỜNG TRƯNG VƯƠNG',generated_at:new Date().toISOString(),status:'OFFLINE_DRAFT_NOT_APPROVED',students:records};
