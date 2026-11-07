@@ -33,8 +33,7 @@
     return clean ? 'DEMO-TV-'+clean : '';
   }
   const hold = (held,why,t) => held.push({reason:why,source_ref:refKey(t),amount:Number(t.amount)||0});
-  async function exportPreview() {
-    const status=document.querySelector('#parentPaymentsExportStatus');
+  async function buildDraft() {
     const input=document.querySelector('#parentChargeReference');
     try {
       if (!input?.files?.length) throw Error('Chưa chọn bảng tham chiếu D1 riêng tư.');
@@ -74,20 +73,46 @@
         if(!dateOK){hold(held,'DATE_NEEDS_VERIFICATION',t);continue;}
         payments.push({source_ref,charge_id:matches[0].portal_charge_id,school_charge_id:plain(item.id),school_student_id:plain(student.code),student_name:plain(student.name),class_name:plain(student.className),period_id:period,charge_name:plain(item.name),amount,paid_at:paid_at_source,mapping_status:'MATCHED_EXACT_DEMO'});
       }
-      if(!payments.length){ if(status)status.textContent='Không có giao dịch đã xác minh đủ điều kiện xuất. '+held.length+' giao dịch cần rà soát; nếu chỉ có file danh sách học sinh thì chưa phải dữ liệu thanh toán. Hãy nhập một giao dịch DEMO vào web trường và kiểm tra tình trạng đã thu trước khi xuất.'; return; }
+      if(!payments.length)throw Error('Chưa có giao dịch đủ điều kiện. Có '+held.length+' giao dịch cần rà soát. Hãy dùng dữ liệu DEMO đã xác minh trước khi đồng bộ.');
       const draft={schema:SCHEMA,school_id:'TRUNGVUONG',status:'OFFLINE_PAYMENT_DRAFT_NOT_APPROVED',mode:'demo_only',generated_at:new Date().toISOString(),reference_generated_at:reference.generated_at,summary:{matched:payments.length,held:held.length,total_matched:payments.reduce((a,b)=>a+b.amount,0)},payments,held};
-      const file='TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_'+new Date().toISOString().slice(0,10)+'.json';
-      download(file,JSON.stringify(draft,null,2),'application/json;charset=utf-8');
-      if(status)status.textContent='Đã đối chiếu chính xác '+payments.length+' giao dịch; '+held.length+' giao dịch cần xác minh. Bản nháp chưa được gửi Cloudflare. Không tải JSON lên GitHub.';
+      return draft;
     } catch(err) {
-      if(status)status.textContent='Chưa thể đối chiếu: '+err.message;
-      console.error('Parent payment mapping preview',err);
+      throw err;
     }
+  }
+  const PORTAL_ORIGIN='https://school-parent-dev.tuananh0001.workers.dev';
+  async function exportPreview(){
+    const status=document.querySelector('#parentPaymentsExportStatus');
+    try{
+      const draft=await buildDraft();
+      download('TRUNGVUONG_PAYMENTS_MAPPED_DRAFT_'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(draft,null,2),'application/json;charset=utf-8');
+      if(status)status.textContent='Đã tạo bản nháp '+draft.payments.length+' giao dịch, '+draft.held.length+' giao dịch giữ lại. Chưa ghi lên Cloudflare.';
+    }catch(e){if(status)status.textContent=e.message;console.error(e)}
+  }
+  async function connectDemo(){
+    const status=document.querySelector('#parentPaymentsExportStatus');
+    // Use a user gesture to open Access without browser popup blocking.
+    const popup=window.open(PORTAL_ORIGIN+'/admin/live-bridge','tvParentPortalDemoBridge');
+    if(!popup){if(status)status.textContent='Trình duyệt chặn cửa sổ. Hãy cho phép popup rồi thử lại.';return}
+    let draft;
+    try{draft=await buildDraft()}catch(e){popup.close();if(status)status.textContent='Chưa thể đối chiếu: '+e.message;return}
+    if(draft.payments.length>30){popup.close();if(status)status.textContent='Lô vượt 30 giao dịch, hãy chia lô theo lớp/kỳ trên bản nháp.';return}
+    const listener=ev=>{
+      if(ev.origin!==PORTAL_ORIGIN||ev.source!==popup||ev.data?.type!=='TV_PORTAL_READY'||!/^([a-f0-9]{40})$/.test(ev.data.challenge||''))return;
+      window.removeEventListener('message',listener);
+      popup.postMessage({type:'TV_PORTAL_DRAFT',challenge:ev.data.challenge,draft},PORTAL_ORIGIN);
+      if(status)status.textContent='Đã gửi bản nháp '+draft.payments.length+' giao dịch tới trang quản trị. Cần kiểm tra và duyệt trên Cloudflare; không ghi tự động.';
+    };
+    window.addEventListener('message',listener);
+    if(status)status.textContent='Đang mở Cloudflare Access. Đăng nhập tại cửa sổ mới để tiếp tục.';
   }
   document.addEventListener('DOMContentLoaded',()=>{
     const tester = new URLSearchParams(location.search).get('parentSyncPreview') === '1';
-    const panel = document.querySelector('#parentPaymentsPreviewPanel');
-    if (panel) panel.hidden = !tester;
-    if (tester) document.querySelector('#exportParentPaymentsPreview')?.addEventListener('click',exportPreview);
+    const panel=document.querySelector('#parentPaymentsPreviewPanel');
+    if(panel)panel.hidden=!tester;
+    if(tester){
+      document.querySelector('#exportParentPaymentsPreview')?.addEventListener('click',exportPreview);
+      document.querySelector('#sendParentPaymentsPreview')?.addEventListener('click',connectDemo);
+    }
   });
 })();
