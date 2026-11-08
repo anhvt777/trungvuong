@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'so-thu-hoc-sinh-trungvuong-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v35-school-qr-portal-handoff';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './insurance.js', './manifest.json', './icon.svg', './vendor/qrcode.min.js', './vendor/jszip.min.js'];
+const CACHE_NAME = CACHE_PREFIX + 'v36-grouped-workflow-menu';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './workflow-navigation.js', './insurance.js', './manifest.json', './icon.svg', './vendor/qrcode.min.js', './vendor/jszip.min.js'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)));
   self.skipWaiting();
@@ -13,7 +13,7 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
   const url = new URL(request.url);
-  const isCritical = request.mode === 'navigate' || /\/(index\.html|app\.js|styles\.css|sw\.js)$/.test(url.pathname);
+  const isCritical = request.mode === 'navigate' || /\/(index\.html|app\.js|workflow-navigation\.js|styles\.css|sw\.js)$/.test(url.pathname);
   if (isCritical) {
     event.respondWith(fetch(request).then(response => {
       if (response.ok) { const copy=response.clone(); caches.open(CACHE_NAME).then(cache=>cache.put(request,copy)); }
