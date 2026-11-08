@@ -28,7 +28,7 @@
     let dataString='000201010212'+tag('38',bankData)+'52040000'+'5303704'+tag('54',String(amount))+'5802VN'+tag('59',name.slice(0,25))+tag('60','VIETNAM')+tag('62',tag('08',remark))+'6304';
     return dataString+crc(dataString);
   }
-  function parseCRC(payload){return /^[0-9A-Z]+$/.test(String(payload))&&String(payload).endsWith(crc(String(payload).slice(0,-4)))}
+  function parseCRC(payload){return typeof payload==='string'&&payload.length>8&&/^6304[0-9A-F]{4}$/.test(payload.slice(-8))&&payload.slice(-4)===crc(payload.slice(0,-4))}
   function verify(data,payload){try{return generate(data)===payload&&parseCRC(payload)}catch{return false}}
   return Object.freeze({version:VERSION,bankBin:BANK_BIN,normalize,generate,verify,crc});
 });
