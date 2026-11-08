@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trưng Vương | Kiểm thử BIDV QR Engine V1</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#173e43;background:#edf5f2}body{margin:0}.hero{background:#006c63;color:white;padding:26px 20px;text-align:center}.hero h1{margin:0;font-size:25px}main{max-width:920px;margin:26px auto;padding:0 15px}.card{background:white;border-radius:16px;padding:22px;margin:16px 0;box-shadow:0 4px 20px #0b30200d}.warn{background:#fff0cc;padding:15px;border-radius:10px;color:#533e15}.field{margin:16px 0}label{display:block;margin-bottom:7px;font-weight:600}select,button{font:inherit;padding:12px;border-radius:9px}select{width:100%;border:1px solid #b1cdc8}button{background:#087c70;color:#fff;border:0;cursor:pointer}button:disabled{opacity:.4}.grid{display:grid;grid-template-columns:minmax(240px,1fr) minmax(240px,1fr);gap:18px}img{display:block;max-width:100%;width:360px;margin:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#edf5f2;padding:14px;border-radius:8px}.small{font-size:13px;color:#52666a}a{color:#0d766d}@media(max-width:720px){.grid{grid-template-columns:1fr}.hero h1{font-size:21px}}
+</style></head><body>
+<header class="hero"><h1>BIDV QR Engine V1 · Trường Trưng Vương</h1><div>Kiểm thử một nguồn mã QR chung cho web trường và cổng phụ huynh</div></header>
+<main><div class="card"><p class="warn"><strong>CHỈ LÀ QR GIẢ LẬP – KHÔNG CHUYỂN TIỀN.</strong> Mã tài khoản chứa DEMOONLY, không phải tài khoản BIDV được cấp. Không dùng ảnh tại đây để thanh toán thật. Trang này không lưu hoặc truyền dữ liệu học sinh lên máy chủ.</p>
+<div class="field"><label for="case">Chọn kịch bản giả lập</label><select id="case"><option value="full">Bán trú tháng 11/2026 – phải thu 600.000đ</option><option value="partial">Bán trú tháng 11/2026 – đã nộp 200.000đ, còn 400.000đ</option><option value="dec">Bán trú tháng 12/2026 – kỳ mới 600.000đ</option><option value="paid">Đã nộp đủ – không tạo QR</option></select></div>
+<button id="run">Tạo QR bằng BIDV QR Engine V1</button><span class="small" id="version"></span></div>
+<div class="card grid"><div><img id="image" alt="QR DEMO với nhận diện BIDV" hidden><p id="notice" class="small"></p></div><div><h3>Kiểm tra kết quả</h3><pre id="details">Chọn kịch bản và tạo QR.</pre></div></div>
+<div class="card small">Bộ sinh EMV và bộ vẽ logo được tải từ cùng phiên bản của <a href="https://anhvt777.github.io/bidvqrgen/">bidvqrgen</a>. Bản demo độc lập này không ghi nhận tiền và không làm thay đổi dữ liệu của trường.</div></main>
+<script src="vendor/qrcode.min.js"></script>
+<script src="https://anhvt777.github.io/bidvqrgen/bidv-qr-core.js?v=1.0.0"></script>
+<script src="https://anhvt777.github.io/bidvqrgen/bidv-qr-renderer.js?v=1.0.0"></script>
+<script>
+const demo={accountName:'TRUNG VUONG DEMO',remark:'TV DEMOONLY BAN TRU 2026 11',accountNumber:'TVDEMOONLY6A103BT11'};
+const run=async()=>{
+ const kind=document.getElementById('case').value, image=document.getElementById('image'), out=document.getElementById('details'),notice=document.getElementById('notice');
+ image.hidden=true;
+ if(kind==='paid'){out.textContent='Đã thu đủ. Số còn thiếu: 0đ. Không tạo QR thanh toán.';notice.textContent='Không có QR.';return}
+ if(!window.BIDVQREngine||!window.BIDVQRBrand){out.textContent='Chưa tải được bộ QR Engine/Renderer. Kiểm tra kết nối mạng.';return}
+ const v=kind==='partial'?400000:600000,acct=kind==='dec'?'TVDEMOONLY6A103BT12':demo.accountNumber;
+ const data={...demo,bankBin:'970418',accountNumber:acct,amount:v,remark:kind==='dec'?'TV DEMOONLY BAN TRU 2026 12':demo.remark};
+ try{
+ const payload=window.BIDVQREngine.generate(data),ok=window.BIDVQREngine.verify(data,payload);
+ const png=await window.BIDVQRBrand.render(payload,{label:'HOC SINH GIA LAP – 6A1',amount:v});
+ image.src=png;image.hidden=false;
+ notice.textContent='QR trình diễn kỹ thuật, tuyệt đối không thanh toán. Tài khoản: '+acct;
+ out.textContent=JSON.stringify({mode:'DEMO_NOT_PAYABLE',qr_engine_version:window.BIDVQREngine.version,renderer_version:window.BIDVQRBrand.version,student:'HỌC SINH GIẢ LẬP',period:kind==='dec'?'2026-12':'2026-11',amount:v,account_number:acct,remark:data.remark,crc_valid:ok,crc:payload.slice(-4),payload_length:payload.length},null,2);
+ document.getElementById('version').textContent='Engine V'+window.BIDVQREngine.version+' · Renderer V'+window.BIDVQRBrand.version;
+ }catch(e){out.textContent='Lỗi tạo QR: '+e.message;notice.textContent='Không có QR hợp lệ.'}
+};
+document.getElementById('run').addEventListener('click',run);
+</script></body></html>
