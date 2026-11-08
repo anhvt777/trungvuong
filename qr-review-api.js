@@ -40,6 +40,8 @@ async function reviewedQrApi(req,env){
  const referenceMismatch=!(x.remark===c.payment_reference||x.account_number===c.payment_reference);
  if(matchedBy!=='REFERENCE'&&!referenceMismatch)return reply({status:'HELD',reason:'REFERENCE_MATCH_STATE_UNEXPECTED'},422);
  if(c.payment_account&&c.payment_account!==x.account_number)return reply({status:'HELD',reason:'ACCOUNT_CONFLICT'},422);
+ const duplicate=await env.DB.prepare("SELECT id FROM charges WHERE payment_account=? AND id<>? LIMIT 1").bind(x.account_number,c.id).first();
+ if(duplicate)return reply({status:'HELD',reason:'ACCOUNT_ALREADY_LINKED_TO_ANOTHER_CHARGE'},422);
  if(remaining<=0||remaining!==x.amount)return reply({status:'HELD',reason:'AMOUNT_CHANGED',remaining},422);
  const name=qrTextNormalize(x.charge_name),expected=qrTextNormalize(c.name);
  const cat=v=>/BHYT|BH Y TE/.test(v)?'YT':/BHTT|THAN THE/.test(v)?'TT':/BAN TRU/.test(v)?'BT':null;
