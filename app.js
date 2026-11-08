@@ -1033,7 +1033,7 @@ async function generateQrs(){
     if(!virtualAccount||!payee||!remark){console.warn('QR held: missing verified export identity',entry.item.id);continue;}
     const payload=BIDVQREngine.generate({bankBin:config.bin,accountNumber:virtualAccount,accountName:payee,amount:entry.remaining,remark});
     if(typeof BIDVQRBrand==='undefined')throw new Error('Thiếu BIDV QR Renderer V1; tải lại trang.');
-    const png=await BIDVQRBrand.render(payload,{label:entry.student.name+' '+entry.student.className,amount:entry.remaining});
+    const png=await BIDVQRBrand.render(payload,{label:payee,amount:entry.remaining});
     output.push({...entry,remark,filename:qrFilename(entry),png,qrEngineVersion:BIDVQREngine.version,qrRendererVersion:BIDVQRBrand.version});
   }
   renderQrCards(output);$('#qrSelectionCount').textContent=`${output.length} ảnh QR đã tạo`;
