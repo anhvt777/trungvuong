@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trưng Vương • Kiểm tra QR gốc và đồng bộ cổng phụ huynh</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef6f4;color:#173e39;font:15px system-ui,Arial}
+header{background:#006b64;color:white;padding:19px max(16px,calc((100% - 1050px)/2))}
+header h1{font-size:21px;margin:0 0 7px}header p{margin:0;opacity:.9}
+main{max-width:1050px;margin:18px auto;padding:0 16px}section{background:white;border:1px solid #d6e6e0;border-radius:14px;padding:20px;margin-bottom:15px}
+h2{font-size:18px;margin:0 0 11px}p{line-height:1.5}button,a.btn{border:0;border-radius:8px;background:#006b64;color:white;padding:11px 15px;display:inline-block;text-decoration:none;font:inherit;font-weight:600;cursor:pointer;margin:5px 6px 5px 0}
+button:disabled{opacity:.45;cursor:not-allowed}button.secondary,a.secondary{color:#006b64;background:#e6f4ef}
+input[type=file]{width:100%;padding:13px;border:1px dashed #88aaa0;border-radius:9px}
+.notice{background:#fff4db;padding:12px;border-radius:9px}small{color:#56746a}.summary{font-weight:650}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;border-bottom:1px solid #e0e9e5;padding:9px;vertical-align:top}th{background:#eef6f3}
+.wrap{overflow-x:auto;max-height:480px}.bad{color:#a33f2e;font-weight:700}.good{color:#08795b;font-weight:700}
+label.confirm{display:block;margin:15px 0;font-weight:600}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f5f3;padding:12px}
+</style></head><body>
+<header><h1>TRƯỜNG TRƯNG VƯƠNG · Đối chiếu QR gốc</h1><p>Kiểm tra QR đã tạo ở BIDV Studio theo món thu của trường, không tạo lại QR và không tự ghi dữ liệu lên Cloudflare.</p></header>
+<main><section><h2>1. Nhập danh mục QR từ BIDV QR Studio</h2>
+<p>Mở <a href="https://anhvt777.github.io/bidvqrgen/studio/" target="_blank" rel="noopener">BIDV QR Studio</a>, nhập đúng bảng QR mà trường đã xuất, sau đó tải JSON danh mục QR cho cổng phụ huynh. Dữ liệu chỉ được kiểm tra cục bộ tại trình duyệt này.</p>
+<input id="file" type="file" accept=".json,application/json"><p id="summary" class="summary">Chưa nhập danh mục.</p>
+<div class="notice">Chỉ thử nghiệm với dữ liệu giả lập Trưng Vương. QR hợp lệ về cấu trúc chưa chứng minh tài khoản định danh đã được BIDV kích hoạt; nhà trường cần kiểm tra khi phê duyệt.</div></section>
+<section><h2>2. Đối chiếu với danh mục món thu trên máy nhà trường</h2>
+<div class="wrap"><table><thead><tr><th>Học sinh / Lớp</th><th>Món thu</th><th>Tài khoản QR</th><th>Số tiền</th><th>Kết quả</th></tr></thead><tbody id="rows"><tr><td colspan="5">Chưa có dữ liệu</td></tr></tbody></table></div>
+<label class="confirm"><input type="checkbox" id="confirm"> Tôi xác nhận danh mục QR này là danh mục nhà trường đã kiểm tra tài khoản BIDV, số tiền và nội dung chuyển khoản trước khi công bố.</label>
+<button id="approve" disabled>Ghi nhận QR đã duyệt trên máy trường</button>
+<button class="secondary" id="export" disabled>Tải danh mục QR đã đối chiếu</button>
+<button class="secondary" id="connect" disabled>Chuyển danh mục sang cổng phụ huynh</button>
+<p id="status" role="status"></p></section>
+<section><h2>3. Cơ chế đồng bộ</h2><p>Hệ thống chỉ chuyển <b>ảnh QR gốc và payload gốc</b> từ Studio. Trang quản trị Cloudflare sẽ kiểm tra dữ liệu trùng khớp với món thu đã công bố trên D1 trước khi hiển thị; việc kiểm tra trên cổng là bước xác minh kỹ thuật, không tạo QR mới.</p>
+<p><a href="https://school-parent-dev.tuananh0001.workers.dev/admin/qr-review" target="_blank" rel="noopener">Trang quản trị công bố QR</a> · <a href="https://school-parent-dev.tuananh0001.workers.dev/admin/qr-status" target="_blank" rel="noopener">Trạng thái QR trên cổng</a></p>
+<small>Giai đoạn này chưa có đồng bộ tự động khoản thu hoặc file giao dịch BIDV Direct. Không sử dụng chức năng này với học sinh thật trước khi hoàn thiện bảo mật và kiểm thử.</small></section>
+</main>
+<script src="https://anhvt777.github.io/bidvqrgen/bidv-qr-core.js?v=1.0.0"></script>
+<script>
+(function(){
+'use strict';
+const e=id=>document.getElementById(id);
+const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[đĐ]/g,'D').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+const key=x=>norm(x).replace(/\s+/g,'');
+let manifest=null,accepted=[],issues=[],approved=null;
+const reset=()=>{accepted=[];issues=[];approved=null;e('approve').disabled=true;e('export').disabled=true;e('connect').disabled=true;e('confirm').checked=false;};
+function storeAll(db,name){return new Promise((resolve,reject)=>{const tx=db.transaction(name,'readonly'),r=tx.objectStore(name).getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+async function schoolStudents(){return new Promise((resolve,reject)=>{const r=indexedDB.open('so-thu-hoc-sinh-trungvuong-local',2);r.onupgradeneeded=()=>{r.transaction.abort();reject(Error('Chưa khởi tạo dữ liệu Trưng Vương trên trình duyệt này'))};r.onerror=()=>reject(r.error);r.onsuccess=async()=>{const db=r.result;try{if(!db.objectStoreNames.contains('students'))throw Error('Không có danh mục học sinh cục bộ');const students=await storeAll(db,'students');db.close();resolve(students);}catch(err){db.close();reject(err)}};});}
+function items(s){return Array.isArray(s.dueItems)?s.dueItems.filter(x=>Number(x.amount)>0&&!x.legacy):[];}
+function findMatch(row,students){
+ const pool=[];for(const s of students){if(s.status==='inactive')continue;
+  if(norm(s.name)!==norm(row.student_name)||norm(s.className)!==norm(row.class_name))continue;
+  for(const item of items(s)){
+    if(Number(item.amount)!==Number(row.amount))continue;
+    if(item.qrAccountNumber&&key(item.qrAccountNumber)!==key(row.account_number))continue;
+    if(!item.qrAccountNumber&&key(item.paymentCode)!==key(row.account_number)&&key(item.paymentCode)!==key(row.remark))continue;
+    const itemLabel=norm(item.name),feeLabel=norm(row.charge_name);
+    if(itemLabel!==feeLabel&&!itemLabel.includes(feeLabel)&&!feeLabel.includes(itemLabel))continue;
+    pool.push({student:s,item});
+  }
+ }
+ if(pool.length!==1)throw Error(pool.length?'Một QR khớp nhiều món thu':'Không tìm thấy món thu tương ứng tại trường');
+ return pool[0];
+}
+function validateRow(row,students,seen){
+ if(!row||typeof row!=='object')throw Error('Dòng không hợp lệ');
+ if(!window.BIDVQREngine||window.BIDVQREngine.version!=='1.0.0')throw Error('BIDV Engine chưa tải');
+ if(row.bank_bin!=='970418'||!Number.isSafeInteger(row.amount)||row.amount<=0)throw Error('BIN hoặc số tiền QR không hợp lệ');
+ if(typeof row.qr_png_base64!=='string'||!row.qr_png_base64.startsWith('iVBORw0KGgo')||row.qr_png_base64.length>175000)throw Error('Ảnh PNG không đúng chuẩn');
+ if(!BIDVQREngine.verify(row,row.qr_payload))throw Error('Payload không khớp tài khoản, số tiền hoặc nội dung');
+ const m=findMatch(row,students),id=m.student.code+'|'+m.item.id;
+ if(seen.has(id))throw Error('Trùng món thu trong danh mục QR');seen.add(id);
+ const acct=key(row.account_number)+'|'+norm(row.remark);
+ if(seen.has(acct))throw Error('Trùng tài khoản và nội dung');seen.add(acct);
+ return {row,student_code:m.student.code,charge_id:m.item.id,match_key:id};
+}
+async function check(){
+ reset();e('rows').innerHTML='';e('status').textContent='';
+ if(!manifest||manifest.schema!=='bidvqrgen-parent-qr-manifest/1'||manifest.school_id!=='TRUNGVUONG'||!Array.isArray(manifest.rows)||manifest.qr_engine_version!=='1.0.0'||manifest.qr_renderer_version!=='1.0.0')throw Error('Đây không phải danh mục QR Studio V1 của Trưng Vương');
+ const students=await schoolStudents(),seen=new Set();let html='';
+ for(let i=0;i<manifest.rows.length;i++){
+  const row=manifest.rows[i];try{const out=validateRow(row,students,seen);accepted.push(out);html+='<tr><td>'+safe(row.student_name)+'<br><small>'+safe(row.class_name)+'</small></td><td>'+safe(row.charge_name)+'</td><td>'+safe(row.account_number)+'</td><td>'+Number(row.amount).toLocaleString('vi-VN')+'</td><td class="good">Khớp món '+safe(out.charge_id)+'</td></tr>';}
+  catch(err){issues.push({line:i+1,reason:err.message});html+='<tr><td>'+safe(row.student_name||'-')+'</td><td>'+safe(row.charge_name||'-')+'</td><td>'+safe(row.account_number||'-')+'</td><td>'+safe(row.amount||'-')+'</td><td class="bad">'+safe(err.message)+'</td></tr>';}
+ }
+ e('rows').innerHTML=html||'<tr><td colspan="5">Tệp không có QR.</td></tr>';
+ e('summary').textContent='Đối chiếu '+manifest.rows.length+' QR; hợp lệ '+accepted.length+'; cần xử lý '+issues.length+'. Dữ liệu trường trên máy: '+students.length+' học sinh.';
+ e('approve').disabled=!!issues.length||!accepted.length;
+}
+function safe(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+e('file').onchange=async()=>{reset();try{const f=e('file').files[0];if(!f)return;if(f.size>9000000)throw Error('Tệp quá lớn');manifest=JSON.parse(await f.text());await check();}catch(err){e('summary').textContent='Không thể đối chiếu: '+err.message;}};
+e('approve').onclick=async()=>{
+ if(!e('confirm').checked){e('status').textContent='Bạn cần xác nhận đã kiểm tra tài khoản và khoản thu tại trường.';return;}
+ if(issues.length||!accepted.length)return;
+ const students=await schoolStudents(),seen=new Set();
+ for(const x of manifest.rows)validateRow(x,students,seen);
+ const source=JSON.stringify(manifest.rows.map(r=>[r.account_number,r.amount,r.remark,r.qr_payload]));
+ const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source))),v=>v.toString(16).padStart(2,'0')).join('');
+ approved={...manifest,source:'trungvuong-school-approved',status:'SCHOOL_APPROVED_QR',school_reviewed_at:new Date().toISOString(),school_manifest_sha256:hash,matches:accepted.map(a=>({student_code:a.student_code,charge_id:a.charge_id,account_number:a.row.account_number}))};
+ const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('so-thu-hoc-sinh-trungvuong-local',2);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+ try{await new Promise((resolve,reject)=>{const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:'schoolApprovedQrManifest',value:approved,updatedAt:approved.school_reviewed_at});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}finally{db.close()}
+ e('export').disabled=false;e('connect').disabled=false;
+ e('status').textContent='Đã ghi nhận danh mục '+approved.rows.length+' QR tại trường, SHA-256: '+hash.slice(0,16)+'… Chưa công bố Cloudflare.';
+};
+e('export').onclick=()=>{if(!approved)return;const u=URL.createObjectURL(new Blob([JSON.stringify(approved,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='TRUNGVUONG_SCHOOL_APPROVED_QR.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);};
+e('connect').onclick=()=>{
+ if(!approved)return;const target='https://school-parent-dev.tuananh0001.workers.dev';const popup=window.open(target+'/admin/qr-review','schoolParentQrReview');if(!popup){e('status').textContent='Trình duyệt chặn cửa sổ Cloudflare';return;}
+ const listener=ev=>{if(ev.origin!==target||ev.source!==popup||ev.data?.type!=='BIDV_QR_PORTAL_READY'||!/^[a-f0-9]{40}$/.test(ev.data.challenge||''))return;window.removeEventListener('message',listener);popup.postMessage({type:'BIDV_QR_PORTAL_DRAFT',challenge:ev.data.challenge,manifest:approved},target);e('status').textContent='Đã gửi bản danh mục QR đã đối chiếu sang trang quản trị Cloudflare. Cần hoàn tất công bố trên trang quản trị.';};
+ window.addEventListener('message',listener);popup.postMessage({type:'BIDV_QR_PORTAL_HELLO'},target);e('status').textContent='Đang mở Cloudflare Access và chuyển danh mục sau khi xác thực.';
+};
+})();
+</script></body></html>
