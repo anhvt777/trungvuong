@@ -2612,7 +2612,8 @@ async function exportParentPreview(){
       const amount=Number(i.amount)||0;
       const paymentRef=String(i.qrAccountNumber||i.paymentCode||'');
       const qrReady=!paid&&/^\d{6}$/.test(qrConfig?.bin||'')&&/^\d{4,30}$/.test(qrConfig?.accountNumber||'')&&!!qrConfig?.accountName&&!!paymentRef;
-      const payload=qrReady?buildVietQrPayload(qrConfig,amount,paymentRef):null;
+      // Parent sync transfers obligations only; QR is generated, verified and published through the independent QR Engine review flow.
+      const payload=null;
       return {charge_id:String(i.id),name:String(i.name||''),category:String(i.category||''),period:String(i.periodId||i.period||''),period_id:String(i.periodId||i.period||''),period_type:String(i.periodType||''),qr_account_number:String(i.qrAccountNumber||''),due:amount,paid:paid?amount:0,remaining:paid?0:amount,payment_reference:paymentRef,qr_payload:payload};
     })
   }));
