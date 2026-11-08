@@ -23,17 +23,31 @@ async function reviewedQrApi(req,env){
  if(w<180||w>1200||h<180||h>1200)return reply({error:'Invalid QR image dimensions'},422);
  if(x.qr_payload.length>600||x.qr_payload!==qrBuildEmv(x))return reply({error:'EMV payload mismatch'},422);
  const rs=await env.DB.prepare("SELECT c.id,c.name,c.payment_reference,c.payment_account,c.amount_due,c.qr_verified,c.qr_amount,s.uid,s.display_name,s.class_name,p.label period_label,COALESCE(SUM(CASE WHEN pay.status='confirmed' THEN pa.amount ELSE 0 END),0) paid FROM charges c JOIN students s ON s.uid=c.student_uid JOIN billing_periods p ON p.id=c.period_id LEFT JOIN payment_allocations pa ON pa.charge_id=c.id LEFT JOIN payments pay ON pay.id=pa.payment_id WHERE s.school_id='TRUNGVUONG' AND s.uid LIKE 'tv_demo_%' AND c.published=1 AND (c.payment_reference=? OR c.payment_reference=?) GROUP BY c.id").bind(x.remark,x.account_number).all();
- const candidates=(rs.results||[]).filter(c=>qrTextNormalize(c.display_name)===qrTextNormalize(x.student_name)&&qrTextNormalize(c.class_name)===qrTextNormalize(x.class_name));
- if(candidates.length!==1)return reply({status:'HELD',reason:candidates.length?'AMBIGUOUS':'NO_EXACT_STUDENT_CHARGE_MATCH'},422);
+ const matchingStudent=c=>qrTextNormalize(c.display_name)===qrTextNormalize(x.student_name)&&qrTextNormalize(c.class_name)===qrTextNormalize(x.class_name);
+ let candidates=(rs.results||[]).filter(matchingStudent);
+ let matchedBy='REFERENCE';
+ if(candidates.length!==1){
+   // AccountNumber from bank's Excel may not equal D1's offline reference.
+   // DEMO fallback is diagnostic and MUST be resolved by explicit bank-app verification.
+   const alt=await env.DB.prepare("SELECT c.id,c.name,c.payment_reference,c.payment_account,c.amount_due,c.qr_verified,c.qr_amount,s.uid,s.display_name,s.class_name,p.label period_label,COALESCE(SUM(CASE WHEN pay.status='confirmed' THEN pa.amount ELSE 0 END),0) paid FROM charges c JOIN students s ON s.uid=c.student_uid JOIN billing_periods p ON p.id=c.period_id LEFT JOIN payment_allocations pa ON pa.charge_id=c.id LEFT JOIN payments pay ON pay.id=pa.payment_id WHERE s.school_id='TRUNGVUONG' AND s.uid LIKE 'tv_demo_%' AND c.published=1 AND s.display_name=? AND UPPER(s.class_name)=? GROUP BY c.id").bind(x.student_name,x.class_name.toUpperCase()).all();
+   const fee=qrTextNormalize(x.charge_name),cat=v=>/BHYT|BH Y TE/.test(v)?'YT':/BHTT|THAN THE/.test(v)?'TT':/BAN TRU/.test(v)?'BT':null;
+   const month=String(x.account_number).toUpperCase().match(/BT(0[1-9]|1[0-2])$/)?.[1]||null;
+   candidates=(alt.results||[]).filter(c=>matchingStudent(c)&&(qrTextNormalize(c.name)===fee||(cat(fee)&&cat(fee)===cat(qrTextNormalize(c.name))))&&(!month||c.period_label.includes('Tháng '+Number(month)+'/')));
+   if(candidates.length===1)matchedBy='STUDENT_FEE_PERIOD';
+ }
+ if(candidates.length!==1)return reply({status:'HELD',reason:candidates.length?'AMBIGUOUS_CHARGE_MATCH':'NO_EXACT_STUDENT_CHARGE_MATCH',next:'Check exact bank virtual account and billing period'},422);
  const c=candidates[0],remaining=c.amount_due-c.paid;
+ const referenceMismatch=!(x.remark===c.payment_reference||x.account_number===c.payment_reference);
+ if(matchedBy!=='REFERENCE'&&!referenceMismatch)return reply({status:'HELD',reason:'REFERENCE_MATCH_STATE_UNEXPECTED'},422);
  if(c.payment_account&&c.payment_account!==x.account_number)return reply({status:'HELD',reason:'ACCOUNT_CONFLICT'},422);
  if(remaining<=0||remaining!==x.amount)return reply({status:'HELD',reason:'AMOUNT_CHANGED',remaining},422);
  const name=qrTextNormalize(x.charge_name),expected=qrTextNormalize(c.name);
  const cat=v=>/BHYT|BH Y TE/.test(v)?'YT':/BHTT|THAN THE/.test(v)?'TT':/BAN TRU/.test(v)?'BT':null;
  if(name!==expected&&!(cat(name)&&cat(name)===cat(expected)))return reply({status:'HELD',reason:'FEE_MISMATCH',expected:c.name},422);
- const info={charge_id:c.id,student:c.display_name,class_name:c.class_name,charge_name:c.name,period:c.period_label,due:c.amount_due,paid:c.paid,remaining,account:x.account_number,bin:x.bank_bin,remark:x.remark,payee:x.account_name,previously_verified:c.qr_verified};
+ const info={charge_id:c.id,student:c.display_name,class_name:c.class_name,charge_name:c.name,period:c.period_label,due:c.amount_due,paid:c.paid,remaining,account:x.account_number,bin:x.bank_bin,remark:x.remark,payee:x.account_name,previously_verified:c.qr_verified,matched_by:matchedBy,reference_mismatch:referenceMismatch,existing_payment_reference:c.payment_reference,warning:referenceMismatch?'MÃ TÀI KHOẢN QR KHÁC MÃ THAM CHIẾU D1. Chỉ duyệt sau khi xác minh ngân hàng đã cấp đúng tài khoản cho khoản/kỳ này.':null};
  if(body.action==='preview')return reply({status:'PREVIEW',info,note:'Manually scan QR in bank app and verify payee, account, remark and remaining amount'});
  if(body.confirm!=='I_VERIFIED_QR_WITH_BANK_APP'||body.charge_id!==c.id)return reply({error:'Missing verification confirmation'},403);
+ if(referenceMismatch&&body.confirm_reference_mismatch!=='I_VERIFIED_ACCOUNT_MAPPING')return reply({status:'HELD',reason:'ACCOUNT_REFERENCE_MISMATCH_CONFIRMATION_REQUIRED',info},409);
  const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(x.qr_payload)))).map(v=>v.toString(16).padStart(2,'0')).join('').slice(0,24);
  const update=env.DB.prepare("UPDATE charges SET payment_account=?,qr_png_base64=?,qr_amount=?,qr_verified=1,qr_source=?,revision=revision+1 WHERE id=? AND published=1 AND (payment_account IS NULL OR payment_account=?) AND amount_due-COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE pa.charge_id=charges.id AND p.status='confirmed'),0)=?").bind(x.account_number,x.qr_png_base64,x.amount,'DEMO_ONLY',c.id,x.account_number,x.amount);
  const audit=env.DB.prepare("INSERT INTO audit_events(id,school_id,event_type,target_id,created_at) VALUES(?,?,?,?,?)").bind(crypto.randomUUID(),'TRUNGVUONG','DEMO_QR_APPROVED:'+email+':'+fingerprint,c.id,new Date().toISOString());
