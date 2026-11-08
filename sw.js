@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'so-thu-hoc-sinh-trungvuong-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v34-trungvuong-month-assignment';
+const CACHE_NAME = CACHE_PREFIX + 'v35-school-qr-portal-handoff';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './insurance.js', './manifest.json', './icon.svg', './vendor/qrcode.min.js', './vendor/jszip.min.js'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)));
