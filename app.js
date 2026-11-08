@@ -1016,7 +1016,7 @@ function renderQrCards(entries){
   $('#qrPreviewGrid').innerHTML=entries.map((entry,index)=>`<article class="panel qr-result-card"><div class="qr-result-top"><span class="category-badge ${entry.item.category==='service'?'service':''}">${escapeHTML(entry.item.name)}</span><span class="qr-class-tag">${escapeHTML(entry.student.className||'Chưa xếp lớp')}</span></div><div class="qr-person"><strong>${escapeHTML(entry.student.name)}</strong><small>${escapeHTML(entry.student.code)}</small></div><img src="${entry.png}" alt="Mã QR ${escapeHTML(entry.student.code)} ${escapeHTML(entry.item.name)}"><div class="qr-amount">${money(entry.item.amount)}</div><div class="qr-result-footer"><span>${escapeHTML(entry.remark)}</span><a class="button button-outline button-small" href="${entry.png}" download="${escapeHTML(entry.filename)}">Lưu PNG</a></div></article>`).join('');
 }
 async function generateQrs(){
-  const config=await request('meta','get','qrAccount');if(!config?.bin||!config?.accountNumber||!config?.accountName)return toast('Hãy lưu tài khoản nhận tiền của trường trước.',true);
+  const config=await request('meta','get','qrAccount');if(!config?.bin)return toast('Chưa thiết lập BIN BIDV. Chỉ sử dụng 970418.',true);
   if(typeof QRCode==='undefined'||typeof JSZip==='undefined')return toast('Thiếu bộ tạo ảnh cục bộ. Tải lại trang sau khi kết nối mạng.',true);
   const [students,stored]=await Promise.all([all('students'),all('transactions')]);const transactions=reconcileTransactions(students,stored);
   const className=$('#qrClassFilter').value,fee=$('#qrFeeFilter').value,status=$('#qrStatusFilter').value;
@@ -1025,11 +1025,13 @@ async function generateQrs(){
   const output=[];const unique=new Set();
   for(const entry of entries){
     const key=`${entry.student.code}|${entry.item.id}`;if(unique.has(key))continue;unique.add(key);
-    const code=entry.item.category==='insurance'?'BHYT':entry.item.category==='mandatory'?'BHTT':qrText(entry.item.name,12).replace(/\s+/g,'');
-    const remark=qrText(entry.item.qrAccountNumber||entry.item.paymentCode||`${entry.student.code} ${code}`,25);
-    // Generate only the unpaid balance. Do not publish until account/QR has been verified by the school.
+    // Reuse exactly the bank virtual account/payee/remark pinned when the school's QR export was created.
     if(entry.remaining<=0)continue;
-    const payload=buildVietQrPayload(config,entry.remaining,remark);
+    const virtualAccount=String(entry.item.qrAccountNumber||'').trim();
+    const payee=String(entry.item.qrAccountName||'').trim();
+    const remark=String(entry.item.qrRemark||'').trim();
+    if(!virtualAccount||!payee||!remark){console.warn('QR held: missing verified export identity',entry.item.id);continue;}
+    const payload=BIDVQREngine.generate({bankBin:config.bin,accountNumber:virtualAccount,accountName:payee,amount:entry.remaining,remark});
     if(typeof BIDVQRBrand==='undefined')throw new Error('Thiếu BIDV QR Renderer V1; tải lại trang.');
     const png=await BIDVQRBrand.render(payload,{label:entry.student.name+' '+entry.student.className,amount:entry.remaining});
     output.push({...entry,remark,filename:qrFilename(entry),png,qrEngineVersion:BIDVQREngine.version,qrRendererVersion:BIDVQRBrand.version});
@@ -1370,9 +1372,10 @@ async function qrFileRows(validateOnly=false,balanceOnly=false){
     if(!/^[A-Z0-9]+$/.test(accountNumber))throw new Error(`AccountNumber không hợp lệ: ${accountNumber}`);
     if(seen.has(accountNumber))throw new Error(`Trùng AccountNumber: ${accountNumber}. Hãy đổi tiền tố hoặc cấu trúc mã.`);
     seen.add(accountNumber);
-    const accountName=qrFileText(`${e.student.name} ${e.student.className}`,80);
     const feeName=qrFeeRemarkName(e.feeName);
-    const remark=qrFileText(`${accountName} NOP ${feeName} ${period}`,140);
+    const accountName=balanceOnly?String(e.item.qrAccountName||'').trim():qrFileText(`${e.student.name} ${e.student.className}`,80);
+    const remark=balanceOnly?String(e.item.qrRemark||'').trim():qrFileText(`${accountName} NOP ${feeName} ${period}`,95);
+    if(balanceOnly&&(!accountName||!remark))throw new Error('Chưa có tên tài khoản và nội dung QR gốc cho '+e.student.name+'; cần xuất bảng kê QR lần đầu.');
     if(!accountName||!remark)throw new Error(`Thiếu AccountName/Remark của ${e.student.name}.`);
     rows.push([
       accountNumber,bank,bankBin,balanceOnly?e.remaining:num(e.item.amount),accountName,remark,
@@ -1383,7 +1386,7 @@ async function qrFileRows(validateOnly=false,balanceOnly=false){
     if(e.remaining<num(e.item.amount)&&e.item.qrAccountNumber&&slug(e.item.qrAccountNumber)!==slug(accountNumber))throw new Error('Khoản '+e.feeName+' của '+e.student.name+' đã phát sinh thanh toán; không thể đổi tài khoản định danh.');
     if(slug(e.item.qrAccountNumber)!==slug(accountNumber)||(tvIsMonthlyFee(e.feeShort,e.feeName)&&!e.item.periodId)){
       if(!changes.has(e.student.code))changes.set(e.student.code,new Map());
-      changes.get(e.student.code).set(e.item.id,{accountNumber,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
+      changes.get(e.student.code).set(e.item.id,{accountNumber,accountName,remark,periodId:tvIsMonthlyFee(e.feeShort,e.feeName)?tvMonthFromPeriod(period).periodId:null});
     }
   }
   if(!rows.length)throw new Error('Không có khoản còn thiếu đã có tài khoản định danh. Xuất QR định danh lần đầu trước.');
@@ -1393,7 +1396,7 @@ async function qrFileRows(validateOnly=false,balanceOnly=false){
       const m=changes.get(s.code);if(!m)return s;
       const dueItems=studentDueItems(s).map(item=>{if(!m.has(item.id))return item;
         const record=m.get(item.id);
-        return {...item,qrAccountNumber:record.accountNumber,periodId:record.periodId||item.periodId||'',period:record.periodId||item.period||'',periodType:record.periodId?'month':(item.periodType||'')};
+        return {...item,qrAccountNumber:record.accountNumber,qrAccountName:record.accountName,qrRemark:record.remark,qrEngineVersion:BIDVQREngine.version,periodId:record.periodId||item.periodId||'',period:record.periodId||item.period||'',periodType:record.periodId?'month':(item.periodType||'')};
       });
       return {...s,dueItems,updatedAt:new Date().toISOString()};
     });
