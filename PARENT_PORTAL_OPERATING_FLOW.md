@@ -103,3 +103,22 @@ Trả về `preview_id`, `payload_emv`, `qr_png`, `amount`, `account`, `valid_un
 - Nếu tài khoản đó đã gắn với khoản khác, API từ chối `ACCOUNT_ALREADY_LINKED_TO_ANOTHER_CHARGE`.
 - Ví dụ Hoàng Đức Anh, lớp 6A1, bán trú 11/2026: bản Excel ghi tài khoản `V4THTV266A101BT11` nhưng D1 lưu tham chiếu `V4TVTH266A101BT11`; tiền phải thu 600.000đ, đã thu 200.000đ, còn 400.000đ. File 600.000đ phải bị từ chối; phải xuất lại QR 400.000đ, không thay mã tài khoản giả lập nếu chưa xác minh thuộc ngân hàng. Trên app ngân hàng phải kiểm tra tên người nhận trước khi duyệt.
 - Chưa kiểm thử ảnh QR và popup thực tế trên trình duyệt của cán bộ sau lần cập nhật; chưa duyệt QR vào D1. Chỉ thử nghiệm, không thu tiền thật.
+
+
+## BIDV QR Engine V1 – kết quả triển khai 08/11/2026
+
+**Thư viện dùng chung:** `bidv-qr-core.js` và `bidv-qr-renderer.js` tại `anhvt777/bidvqrgen` và nhánh thử nghiệm Trưng Vương là các bản giống nhau byte-for-byte. Bộ sinh QR hàng loạt và tạo ảnh QR tại web trường cùng sử dụng `BIDVQREngine.generate()` và `BIDVQRBrand.render()`.
+
+**Quy tắc quan trọng:** khi xuất bảng kê QR lần đầu, web trường lưu `qrAccountNumber`, `qrAccountName`, `qrRemark`, `qrEngineVersion` cho từng món thu. Lúc xuất QR số dư còn thiếu hoặc PNG, trường phải dùng đúng các trường đã lưu; không dùng tài khoản ngân hàng chung, không tính lại nội dung chuyển khoản bằng một thuật toán khác. Khi thiếu trường nguồn, yêu cầu xuất lại bảng kê xác minh trước.
+
+**Cloudflare DEMO:** đã có màn hình kiểm thử `/admin/qr-engine`, API `/api/admin/qr-engine/list` và `/api/admin/qr-engine/preview`. Chỉ sử dụng dữ liệu nguồn D1, không nhận tham số tài khoản hoặc tên người thụ hưởng từ phụ huynh. D1 bổ sung `qr_payee_name`, `qr_remark`, `qr_engine_version`, `qr_renderer_version`. Màn hình `/admin/qr-review` yêu cầu QR được tạo từ đúng hai thư viện V1, phải kiểm tra bằng ứng dụng ngân hàng trước khi công bố; cổng tra cứu chỉ hiển thị QR đủ điều kiện và đúng phiên bản.
+
+**Dữ liệu và QA:** đã kiểm tra 60 món thu thuộc 15 học sinh giả lập; 58 món còn thiếu và 2 món đã thu đủ, 7 giao dịch đã xác nhận (2.043.100đ). Hai bản engine tạo payload đồng nhất và CRC hợp lệ trên cả **58/58** trường hợp chưa thu đủ khi dùng thông tin định danh mô phỏng; không tương đương xác minh tài khoản ngân hàng. 6/6 kịch bản API đạt (chưa xác minh, đã thu đủ, QR sai số dư, khác phiên bản, mẫu hợp lệ, origin sai). QR đã được phê duyệt trong D1: **0**.
+
+**Các trang để thử:**
+- `https://anhvt777.github.io/trungvuong/qr-engine-v1-demo.html`: trình diễn ảnh QR BIDV, dùng mã `DEMOONLY` không phải tài khoản thật.
+- `https://school-parent-dev.tuananh0001.workers.dev/admin/qr-engine`: kiểm tra 60 món và trạng thái D1.
+- `https://anhvt777.github.io/bidvqrgen/`: sinh QR hàng loạt cùng Engine/Renderer.
+- `https://school-parent-dev.tuananh0001.workers.dev/admin/qr-review`: duyệt từng QR ngân hàng khi đã được xác minh.
+
+**Chưa nghiệm thu:** quét ảnh trên app ngân hàng, quyền nhiều trường, sao kê BIDV Direct thật ẩn danh và toàn bộ chu trình kết nối đầu-cuối trên trình duyệt của cán bộ. Nhánh trường chưa merge vào main, website chính thức vẫn hoạt động như trước. Trang demo độc lập được tạo trên main nhưng không can thiệp ứng dụng quản lý.
