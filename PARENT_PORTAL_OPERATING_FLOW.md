@@ -94,3 +94,12 @@ Trả về `preview_id`, `payload_emv`, `qr_png`, `amount`, `account`, `valid_un
 **Đã kiểm thử logic:** payload tạo ở bidvqrgen khớp thuật toán kiểm tra EMV của Worker; đối chiếu QR 600.000đ cho nghĩa vụ còn 400.000đ → `HELD/AMOUNT_CHANGED`; 400.000đ → `PREVIEW`; payload bị sửa → bị từ chối; request khác origin → bị từ chối. Những bài test này không thao tác tài khoản ngân hàng.
 
 **Chưa xác nhận:** đăng nhập Access + popup + quét app ngân hàng + bước duyệt mã QR end-to-end trên thiết bị thật, vì chưa có file QR/tài khoản được ngân hàng xác minh. D1 hiện chưa có QR được công bố. Chưa triển khai tài khoản thật/đa trường. Không dùng QR DEMO để thu tiền thật.
+
+## Cập nhật 08/11/2026: ảnh QR nhận diện và sai khác mã tham chiếu
+
+- Bộ sinh `bidvqrgen` được sửa: JSON/handoff chuyển **ảnh PNG QR mới được vẽ ngay trên máy** gồm logo hoa mai BIDV ở trung tâm, đầu trang, logo trường (nếu đã cấu hình trong trình duyệt), tên học sinh và số tiền. Dữ liệu EMV dùng chính BIN, AccountNumber, AccountName, Amount, Remark của dòng Excel; không dùng ảnh QR đen trắng đơn giản trước đây. Xuất lại JSON sau khi mở web bản mới để nhận ảnh có logo.
+- Cloudflare có đường kiểm tra thay thế trên **15 học sinh DEMO**: khi mã tham chiếu D1 khác tài khoản định danh trong file, tìm đối tượng theo tên + lớp + loại khoản + kỳ; chỉ chấp nhận kết quả duy nhất. Nếu có nhiều bản ghi hoặc sai số tiền vẫn `HELD`.
+- Trường hợp tham chiếu khác tài khoản vẫn hiện cảnh báo `reference_mismatch` và đòi hỏi **đánh dấu xác nhận riêng** rằng cán bộ đã đối chiếu với tài khoản định danh do BIDV cấp, ngoài bước quét QR bằng app ngân hàng. Không âm thầm ghi đè `payment_reference`; lưu tài khoản ngân hàng vào `payment_account` của đúng món DEMO.
+- Nếu tài khoản đó đã gắn với khoản khác, API từ chối `ACCOUNT_ALREADY_LINKED_TO_ANOTHER_CHARGE`.
+- Ví dụ Hoàng Đức Anh, lớp 6A1, bán trú 11/2026: bản Excel ghi tài khoản `V4THTV266A101BT11` nhưng D1 lưu tham chiếu `V4TVTH266A101BT11`; tiền phải thu 600.000đ, đã thu 200.000đ, còn 400.000đ. File 600.000đ phải bị từ chối; phải xuất lại QR 400.000đ, không thay mã tài khoản giả lập nếu chưa xác minh thuộc ngân hàng. Trên app ngân hàng phải kiểm tra tên người nhận trước khi duyệt.
+- Chưa kiểm thử ảnh QR và popup thực tế trên trình duyệt của cán bộ sau lần cập nhật; chưa duyệt QR vào D1. Chỉ thử nghiệm, không thu tiền thật.
