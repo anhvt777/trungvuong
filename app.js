@@ -982,10 +982,8 @@ function qrText(value,maxLength=25){return String(value||'').normalize('NFD').re
 function emvTag(id,value){const text=String(value);if(text.length>99)throw new Error(`Trường QR ${id} vượt độ dài cho phép.`);return id+String(text.length).padStart(2,'0')+text;}
 function crc16ccitt(value){let crc=0xFFFF;for(let i=0;i<value.length;i++){crc^=value.charCodeAt(i)<<8;for(let bit=0;bit<8;bit++)crc=crc&0x8000?(crc<<1)^0x1021:crc<<1;crc&=0xFFFF;}return crc.toString(16).toUpperCase().padStart(4,'0');}
 function buildVietQrPayload(config,amount,remark){
-  const accountInfo=emvTag('00','A000000727')+emvTag('01',emvTag('00',config.bin)+emvTag('01',config.accountNumber))+emvTag('02','QRIBFTTA');
-  const reference=emvTag('08',qrText(remark,25));
-  let payload='000201010212'+emvTag('38',accountInfo)+'52040000'+'5303704'+emvTag('54',String(num(amount)))+'5802VN'+emvTag('59',qrText(config.accountName,25))+'6007DONGHA'+emvTag('62',reference)+'6304';
-  payload+=crc16ccitt(payload);return payload;
+  if(typeof BIDVQREngine==='undefined')throw Error('BIDV QR Engine V1 chưa tải');
+  return BIDVQREngine.generate({bankBin:config.bin,accountNumber:config.accountNumber,accountName:config.accountName,amount:num(amount),remark:qrText(remark,25)});
 }
 function qrCandidates(students,transactions){
   const allocated=paidAmountsByItem(transactions,students);
