@@ -145,7 +145,7 @@
           <div class="mapping-note"><span class="note-icon">i</span><div><strong>Cấu trúc file QR:</strong><p><code>AccountNumber</code> = Mã đầu định danh + đúng Mã khách hàng BIDV của cùng học sinh/món thu (cùng tiền tố, năm 2 số, lớp, STT và ký hiệu khoản). <code>AccountName</code> = Họ tên học sinh + lớp. <code>Remark</code> = AccountName + NOP + Tên khoản thu + kỳ thu; tự loại mã BHYT/BHTT/TT/YT bị lặp.</p></div></div>
           <div class="fee-code-preview"><span>Xem trước</span><strong id="qrFileAccountPreview">—</strong><small id="qrFileRemarkPreview">Chọn dữ liệu để xem AccountNumber và Remark mẫu.</small></div>
           <label class="check-row"><input type="checkbox" id="qrFileOnlyUnpaid" checked><span>Chỉ xuất các món chưa thu</span></label>
-          <div class="fee-builder-actions"><button class="button button-outline" id="qrFileValidate">Kiểm tra file QR</button><button class="button button-primary" id="qrFileExport">↓ Xuất XLSX tạo QR</button></div>
+          <div class="fee-builder-actions"><button class="button button-outline" id="qrFileValidate">Kiểm tra file QR</button><button class="button button-primary" id="qrFileExport">↓ Xuất XLSX tạo QR</button><button class="button button-outline" id="qrFileRemainingExport">↓ Xuất QR số dư còn thiếu (giữ tài khoản cũ)</button></div>
           <div class="last-import" id="qrFileStatus">Chưa kiểm tra dữ liệu xuất.</div>
         </article>
       </section>
@@ -331,6 +331,12 @@
         </div>
         <div class="mapping-note"><span class="note-icon">i</span><div><strong>Dữ liệu được đọc trực tiếp trong trình duyệt.</strong><p>Danh sách học sinh có thể có nhiều dòng tiêu đề phía trên; web tự tìm dòng chứa Họ tên/Lớp và nhận mẫu của Trường Trưng Vương. “Mã số CĐ” được lưu như mã ngoài để nhận diện bổ sung, không dùng trực tiếp làm mã thanh toán. Báo cáo ngân hàng vẫn ghép bằng mã khách hàng của từng món thu; chỉ giao dịch thành công và đúng số tiền mới được tính đã thu.</p></div></div>
         <article class="panel table-panel"><div class="panel-header"><div><h2>Kết quả đối soát</h2><p>Giao dịch trùng mã sẽ được bỏ qua khi nhập lần tiếp theo</p></div><div class="filter-pills"><span class="filter-pill">Tất cả <b id="importsAllTxnCount">0</b></span><span class="filter-pill">Khớp <b id="importsMatchedTxnCount">0</b></span><span class="filter-pill">Chưa khớp <b id="importsUnmatchedTxnCount">0</b></span></div></div><div class="table-wrap"><table><thead><tr><th>NGÀY</th><th>MÃ GIAO DỊCH</th><th>KHOẢN THU</th><th>NỘI DUNG</th><th>HỌC SINH</th><th>SỐ TIỀN</th><th>TRẠNG THÁI</th></tr></thead><tbody id="importsTransactionsTable"><tr><td colspan="7" class="empty-cell">Chưa có báo cáo thu.</td></tr></tbody></table></div></article>
+<article class="panel" style="padding:20px;margin-top:18px">
+<h2>Đồng bộ thu nộp sang Cổng phụ huynh</h2>
+<p>Quy trình: nhập bảng kê BIDV Direct → xác minh giao dịch khớp chính xác → đồng bộ có phê duyệt → phụ huynh thấy trạng thái mới. Không tự ghi giao dịch chưa xác minh.</p>
+<p><a href="https://school-parent-dev.tuananh0001.workers.dev/admin/reconciliation" target="_blank" rel="noopener noreferrer">Xem báo cáo đối chiếu đã công bố trên Cổng phụ huynh</a></p>
+<div id="parentPaymentsPreviewPanel" hidden><hr style="margin:18px 0;border:0;border-top:1px solid #dce8e5"><h3>Đồng bộ giao dịch BIDV Direct → Cổng phụ huynh (thử nghiệm)</h3><p>Sau khi tải báo cáo thu BIDV Direct tại tab này và kiểm tra bảng Kết quả đối soát, chuẩn bị bản nháp giao dịch đã ghi nhận để đồng bộ. <strong>Chưa gửi dữ liệu lên Cloudflare</strong>; chỉ dùng dữ liệu giả lập ở giai đoạn này. Giao dịch chưa xác định một món thu sẽ tạm giữ để xác minh.</p><p><a href="https://school-parent-dev.tuananh0001.workers.dev/admin/charge-map" target="_blank" rel="noopener noreferrer">1. Tải bảng tham chiếu 60 khoản thu từ Cloudflare (chỉ cán bộ đã xác thực)</a></p><label for="parentAcademicYear">Năm học áp dụng cho khoản BHYT/BHTT chưa có kỳ thu</label><select id="parentAcademicYear"><option value="2026-2027">Năm học 2026–2027 (DEMO)</option></select><label for="parentChargeReference">2. Chọn file tham chiếu vừa tải về trên máy</label><input id="parentChargeReference" type="file" accept=".json,application/json" style="display:block;margin:8px 0 12px"><button type="button" class="button button-outline" id="exportParentPaymentsPreview">3. Xem trước và tải bản nháp giao dịch (JSON)</button><p id="parentPaymentsExportStatus" role="status"></p><p><strong>4. Duyệt trên Cloudflare:</strong> Sau khi đối chiếu và xác minh bản nháp chỉ có giao dịch giả lập, mở <a href="https://school-parent-dev.tuananh0001.workers.dev/admin/payment-import" target="_blank" rel="noopener noreferrer">công cụ kiểm tra và công bố lô (Cloudflare Access)</a>. Chỉ xác nhận khi số tiền và khoản thu khớp đúng.</p><button class="button button-primary" type="button" id="sendParentPaymentsPreview">4. Đồng bộ khoản thu đã xác minh (DEMO, duyệt tại Cloudflare)</button><p class="tiny">Không đưa mã bí mật vào trình duyệt. Cloudflare Access xác thực cán bộ; hệ thống chỉ ghi khi anh xác nhận trên cổng.</p></div>
+</article>
       </section>
 
       <section class="page" id="page-history">
@@ -436,7 +442,10 @@
   <div class="receipt-print-root" id="receiptPrintRoot" aria-hidden="true"></div>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
-  <script src="app.js?v=tv-month-20261106b"></script>
+  <script src="bidv-qr-core.js?v=1.0.0"></script>
+    <script src="bidv-qr-renderer.js?v=1.0.0"></script>
+    <script src="app.js?v=qr-engine-render-v1"></script>
+  <script src="parent-payment-export.js?v=reviewed-bridge-20261107"></script>
   <script src="insurance.js"></script>
 </body>
 </html>
