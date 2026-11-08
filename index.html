@@ -25,6 +25,7 @@
         <button class="nav-item" data-page="fees"><span class="nav-icon">▤</span>Khoản thu</button>
         <button class="nav-item" data-page="bidv-export"><span class="nav-icon">⇩</span>Bảng kê BIDV</button>
         <a class="nav-item qr-external-link" href="https://anhvt777.github.io/bidvqrgen/" target="_blank" rel="noopener noreferrer" aria-label="Mở công cụ tạo QR và thông báo nộp tiền trong tab mới"><span class="nav-icon">▦</span>Tạo QR & thông báo <span class="external-link-mark" aria-hidden="true">↗</span></a>
+        <a class="nav-item qr-external-link" href="./pilot/trungvuong-qr-staging.html" target="_blank" rel="noopener noreferrer"><span class="nav-icon">◈</span>QR Engine · Kiểm thử <span class="external-link-mark" aria-hidden="true">↗</span></a>
         <button class="nav-item" data-page="imports"><span class="nav-icon">⇧</span>Nhập dữ liệu</button>
         <button class="nav-item" data-page="receipts"><span class="nav-icon">▣</span>Phiếu thu / Xác nhận</button>
         <button class="nav-item" data-page="history"><span class="nav-icon">▣</span>Tra cứu & báo cáo</button>
@@ -189,7 +190,7 @@
               <label class="qr-field"><span>Lớp</span><select id="qrClassFilter"><option value="all">Tất cả lớp</option></select></label>
               <label class="qr-field"><span>Danh sách</span><select id="qrStatusFilter"><option value="unpaid">Chỉ món chưa ghi nhận đã thu</option><option value="all">Tất cả món phải thu</option></select></label>
             </div>
-            <div class="qr-create-actions"><span id="qrSelectionCount">Chưa có QR được tạo</span><button class="button button-primary" id="generateQrs">Tạo QR</button><button class="button button-outline" id="downloadQrs" hidden>↓ Tải ZIP</button></div>
+            <label class="qr-field" style="display:block;margin:12px 0"><span>Nguồn tạo QR (Pilot, mặc định nguồn hiện tại)</span><select id="qrEngineMode"><option value="legacy">QR hiện tại — ổn định</option><option value="engine">Independent QR Engine v1.0 — thử nghiệm</option></select><small style="display:block;margin-top:6px">QR Engine mới tạo ngay trên trình duyệt; nếu dữ liệu không khớp hoặc tài khoản vượt giới hạn, công cụ sẽ báo lỗi, không âm thầm chuyển nguồn.</small></label><div class="qr-create-actions"><span id="qrSelectionCount">Chưa có QR được tạo</span><button class="button button-primary" id="generateQrs">Tạo QR</button><button class="button button-outline" id="downloadQrs" hidden>↓ Tải ZIP</button></div>
           </article>
         </div>
         <div class="qr-preview-header"><div><h2>Ảnh QR theo học sinh</h2><p id="qrPreviewSummary">Chọn điều kiện rồi bấm “Tạo QR”.</p></div></div>
@@ -209,6 +210,7 @@
               <label class="qr-field notice-fee-select"><span>Khoản cần thông báo</span><select id="noticeFees" multiple size="7"><option value="all" selected>Tất cả khoản phù hợp</option></select><small>Giữ Ctrl/Cmd để chọn nhiều khoản. Chọn “Tất cả” để lấy toàn bộ khoản phù hợp.</small></label>
               <label class="qr-field notice-message-field"><span>Lời nhắn cuối thông báo</span><textarea id="noticeMessage" rows="4" maxlength="260">Nếu phụ huynh đã thanh toán, vui lòng bỏ qua thông báo này.</textarea></label>
             </div>
+            <label class="qr-field" style="display:block;margin:10px 0"><span>Nguồn QR cho thông báo nộp tiền</span><select id="noticeQrEngineMode"><option value="legacy">QR hiện tại — mặc định</option><option value="engine">Independent QR Engine v1.0 — thử nghiệm</option></select><small style="display:block;margin-top:6px">Chỉ chọn QR Engine mới khi kiểm thử trên tài khoản ngân hàng hợp lệ; mỗi mã được soát lại dữ liệu và CRC.</small></label>
             <div class="notice-summary-box"><div><span>Số học sinh</span><strong id="noticeStudentCount">0</strong></div><div><span>Số món</span><strong id="noticeItemCount">0</strong></div><div><span>Tổng cần thông báo</span><strong id="noticeAmountTotal">0 ₫</strong></div></div>
           </article>
 
@@ -436,7 +438,8 @@
   <div class="receipt-print-root" id="receiptPrintRoot" aria-hidden="true"></div>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
-  <script src="app.js?v=tv-month-20261106b"></script>
+  <script src="sdk/qr-pay-core.js?v=pilotv12"></script>
+  <script src="app.js?v=tv-month-20261108-qrpilot"></script>
   <script src="insurance.js"></script>
 </body>
 </html>
