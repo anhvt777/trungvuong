@@ -7,12 +7,12 @@ async function reviewedQrPage(req,env){
 <label>2. Chọn một QR cần kiểm tra <select id="choice" disabled><option>Chưa có dữ liệu</option></select></label>
 <div class="two"><div><h3>Ảnh QR nguồn</h3><img id="qr" alt="Ảnh QR nguồn" hidden><p id="details"></p></div><div><h3>Kết quả đối chiếu D1</h3><pre id="result">Chưa kiểm tra</pre></div></div>
 <button id="preview" disabled>3. Đối chiếu với dữ liệu D1</button>
-<label><input type="checkbox" id="verified" disabled> Tôi đã quét QR bằng ứng dụng ngân hàng, kiểm tra đúng tên thụ hưởng, tài khoản, nội dung định danh và số tiền</label>
+<label><input type="checkbox" id="verified" disabled> Tôi đã quét QR bằng ứng dụng ngân hàng, kiểm tra đúng tên thụ hưởng, tài khoản, nội dung định danh và số tiền</label><label class="warn" id="referenceWarning" hidden><input type="checkbox" id="referenceConfirmed"> TÀI KHOẢN QR KHÁC MÃ THAM CHIẾU D1. Tôi đã đối chiếu với danh sách tài khoản định danh BIDV được cấp cho đúng học sinh, khoản và kỳ thu; chấp nhận liên kết có kiểm soát.</label>
 <button id="approve" disabled>4. Công bố QR đã kiểm tra (DEMO)</button><p id="status" role="status"></p>
 <script>
 (()=>{
 let items=[],current=null,checked=null;
-const e=id=>document.getElementById(id),reset=()=>{e('verified').checked=false;e('verified').disabled=true;e('approve').disabled=true;checked=null};
+const e=id=>document.getElementById(id),reset=()=>{e('verified').checked=false;e('verified').disabled=true;e('approve').disabled=true;e('referenceConfirmed').checked=false;e('referenceWarning').hidden=true;checked=null};
 const SRC='https://anhvt777.github.io';
 if(window.opener){
  const challenge=Array.from(crypto.getRandomValues(new Uint8Array(20)),v=>v.toString(16).padStart(2,'0')).join('');
@@ -57,12 +57,13 @@ e('file').addEventListener('change',async ev=>{
 });
 e('choice').addEventListener('change',show);
 async function api(action){
- const r=await fetch('/api/admin/qr-review',{method:'POST',headers:{'Content-Type':'application/json','X-Portal-QR':'review-v1'},credentials:'same-origin',body:JSON.stringify({action,school_id:'TRUNGVUONG',schema:'bidvqrgen-parent-qr-manifest/1',row:current,charge_id:checked?.charge_id,confirm:action==='approve'?'I_VERIFIED_QR_WITH_BANK_APP':''})});
+ const r=await fetch('/api/admin/qr-review',{method:'POST',headers:{'Content-Type':'application/json','X-Portal-QR':'review-v1'},credentials:'same-origin',body:JSON.stringify({action,school_id:'TRUNGVUONG',schema:'bidvqrgen-parent-qr-manifest/1',row:current,charge_id:checked?.charge_id,confirm:action==='approve'?'I_VERIFIED_QR_WITH_BANK_APP':'',confirm_reference_mismatch:e('referenceConfirmed').checked?'I_VERIFIED_ACCOUNT_MAPPING':''})});
  let d;try{d=await r.json()}catch{d={error:'Không đọc được phản hồi'}}return {ok:r.ok,data:d};
 }
-e('preview').addEventListener('click',async()=>{reset();e('preview').disabled=true;try{const r=await api('preview');e('result').textContent=JSON.stringify(r.data,null,2);if(r.ok&&r.data.status==='PREVIEW'){checked=r.data.info;e('verified').disabled=false;e('status').textContent='Đối chiếu D1 khớp. Hãy quét QR thật bằng app ngân hàng để xác minh.'}else e('status').textContent='QR chưa đủ điều kiện công bố.'}catch{e('status').textContent='Không kết nối được API. Chưa ghi D1.'}finally{e('preview').disabled=false}});
-e('verified').addEventListener('change',()=>{e('approve').disabled=!(checked&&e('verified').checked)});
-e('approve').addEventListener('click',async()=>{if(!checked||!e('verified').checked||!confirm('Anh xác nhận đã quét QR bằng app ngân hàng và kiểm tra đúng mọi thông tin trước khi công bố DEMO?'))return;e('approve').disabled=true;e('preview').disabled=true;try{const r=await api('approve');e('result').textContent=JSON.stringify(r.data,null,2);e('status').textContent=r.ok&&r.data.status==='QR_VERIFIED'?'Đã ghi QR đã được cán bộ xác nhận vào D1.':'Chưa công bố. Kiểm tra kết quả.'}catch{e('status').textContent='Lỗi xác nhận. Kiểm tra trạng thái trước khi thử lại.'}finally{e('preview').disabled=false;reset()}});
+e('preview').addEventListener('click',async()=>{reset();e('preview').disabled=true;try{const r=await api('preview');e('result').textContent=JSON.stringify(r.data,null,2);if(r.ok&&r.data.status==='PREVIEW'){checked=r.data.info;e('verified').disabled=false;e('referenceWarning').hidden=!checked.reference_mismatch;e('status').textContent=checked.reference_mismatch?'Khác mã D1! Cần xác minh tài khoản BIDV và đánh dấu xác nhận liên kết trước khi duyệt.':'Đối chiếu D1 khớp. Hãy quét QR thật bằng app ngân hàng để xác minh.'}else e('status').textContent='QR chưa đủ điều kiện công bố.'}catch{e('status').textContent='Không kết nối được API. Chưa ghi D1.'}finally{e('preview').disabled=false}});
+function updateApproval(){e('approve').disabled=!(checked&&e('verified').checked&&(!checked.reference_mismatch||e('referenceConfirmed').checked))}
+e('verified').addEventListener('change',updateApproval);e('referenceConfirmed').addEventListener('change',updateApproval);
+e('approve').addEventListener('click',async()=>{if(!checked||!e('verified').checked||(checked.reference_mismatch&&!e('referenceConfirmed').checked)||!confirm('Anh xác nhận đã quét QR bằng app ngân hàng và kiểm tra đúng mọi thông tin trước khi công bố DEMO?'))return;e('approve').disabled=true;e('preview').disabled=true;try{const r=await api('approve');e('result').textContent=JSON.stringify(r.data,null,2);e('status').textContent=r.ok&&r.data.status==='QR_VERIFIED'?'Đã ghi QR đã được cán bộ xác nhận vào D1.':'Chưa công bố. Kiểm tra kết quả.'}catch{e('status').textContent='Lỗi xác nhận. Kiểm tra trạng thái trước khi thử lại.'}finally{e('preview').disabled=false;reset()}});
 })();
 </script></main></html>`;
  return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'private,no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; frame-ancestors 'none'"}});
