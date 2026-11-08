@@ -933,6 +933,19 @@ function buildVietQrPayload(config,amount,remark){
   let payload='000201010212'+emvTag('38',accountInfo)+'52040000'+'5303704'+emvTag('54',String(num(amount)))+'5802VN'+emvTag('59',qrText(config.accountName,25))+'6007DONGHA'+emvTag('62',reference)+'6304';
   payload+=crc16ccitt(payload);return payload;
 }
+// QR Engine Pilot: opt-in, fail-closed validation; never changes parent-sync payload generation.
+function buildPilotQrPayload(config,amount,remark,source='legacy'){
+  if(source!=='engine')return buildVietQrPayload(config,amount,remark);
+  if(!globalThis.QRPay?.generate||!globalThis.QRPay?.decode)throw new Error('QR Engine SDK chưa sẵn sàng. Chưa xuất mã thử nghiệm.');
+  const bin=String(config.bin||'').trim(),account=String(config.accountNumber||'').trim();
+  const moneyValue=String(num(amount)),memo=qrText(remark,25);
+  // QRPay rejects an unsupported beneficiary, instead of silently falling back to legacy.
+  const payload=QRPay.generate({bin,account,amount:moneyValue,note:memo});
+  const d=QRPay.decode(payload);
+  if(!d.valid||d.guid!=='A000000727'||d.service!=='QRIBFTTA'||d.bin!==bin||d.account!==account||d.amount!==moneyValue||d.note!==memo)
+    throw new Error('Dữ liệu QR Engine không khớp sau khi giải mã; mã chưa được xuất.');
+  return payload;
+}
 function qrCandidates(students,transactions){
   const paid=new Set(transactions.filter(t=>t.paymentStatus==='valid').flatMap(transactionPaidKeys));
   return students.flatMap(student=>studentDueItems(student).filter(item=>item.category!=='other'&&!item.legacy&&item.amount>0).map(item=>({student,item,paid:paid.has(`${student.code}|${item.id}`)})));
@@ -969,13 +982,13 @@ async function generateQrs(){
   for(const entry of entries){
     const key=`${entry.student.code}|${entry.item.id}`;if(unique.has(key))continue;unique.add(key);
     const code=entry.item.category==='insurance'?'BHYT':entry.item.category==='mandatory'?'BHTT':qrText(entry.item.name,12).replace(/\s+/g,'');
-    const remark=qrText(entry.item.paymentCode||`${entry.student.code} ${code}`,25);const payload=buildVietQrPayload(config,entry.item.amount,remark);
+    const remark=qrText(entry.item.paymentCode||`${entry.student.code} ${code}`,25);const payload=buildPilotQrPayload(config,entry.item.amount,remark,$('#qrEngineMode')?.value||'legacy');
     const holder=document.createElement('div');new QRCode(holder,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
     const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được ảnh QR trên trình duyệt này.');
     output.push({...entry,remark,filename:qrFilename(entry),png:canvas.toDataURL('image/png')});
   }
   renderQrCards(output);$('#qrSelectionCount').textContent=`${output.length} ảnh QR đã tạo`;
-  $('#qrPreviewSummary').textContent=`${output.length} mã, mỗi mã gắn với đúng một học sinh và một món thu.`;
+  $('#qrPreviewSummary').textContent=`${output.length} mã, mỗi mã gắn với đúng một học sinh và một món thu. Nguồn: ${$('#qrEngineMode')?.value==='engine'?'Independent QR Engine v1.0 (PILOT)':'QR hiện tại'}.`;
   const zip=new JSZip();for(const item of output)zip.folder(qrText(item.student.className||'Chua_xep_lop',30)||'Chua_xep_lop').file(item.filename,item.png.split(',')[1],{base64:true});
   $('#downloadQrs').onclick=async()=>{const blob=await zip.generateAsync({type:'blob'});download(`SchoolCollect_QR_${new Date().toISOString().slice(0,10)}.zip`,blob,'application/zip');};
   $('#downloadQrs').hidden=false;
@@ -1811,7 +1824,7 @@ async function buildNoticeEntries(){
   const transactions=reconcileTransactions(students,stored),groups=noticeCandidates(students,transactions);if(!groups.length)throw new Error('Không có học sinh/khoản thu phù hợp để tạo thông báo.');
   const deadline=$('#noticeDeadline').value||'',message=$('#noticeMessage').value.trim(),now=new Date().toISOString(),bundles=[],entries=[];
   for(const group of groups){
-    const remark=noticeRemark(group.student,group.items),payload=buildVietQrPayload(config,group.total,remark),qr=qrDataUrl(payload,420);
+    const remark=noticeRemark(group.student,group.items),payload=buildPilotQrPayload(config,group.total,remark,$('#noticeQrEngineMode')?.value||'legacy'),qr=qrDataUrl(payload,420);
     const bundle={remark,studentCode:group.student.code,itemIds:group.items.map(x=>x.id),amount:group.total,deadline,createdAt:now};
     bundles.push(bundle);entries.push({...group,remark,qr,deadline,message,school:{parentUnit:receiptConfig.parentUnit||'',schoolName:receiptConfig.schoolName||'TRƯỜNG TRƯNG VƯƠNG',schoolAddress:receiptConfig.schoolAddress||'',head:receiptConfig.head||''},qrConfig:config});
   }
