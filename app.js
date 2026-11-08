@@ -1030,9 +1030,9 @@ async function generateQrs(){
     // Generate only the unpaid balance. Do not publish until account/QR has been verified by the school.
     if(entry.remaining<=0)continue;
     const payload=buildVietQrPayload(config,entry.remaining,remark);
-    const holder=document.createElement('div');new QRCode(holder,{text:payload,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
-    const canvas=holder.querySelector('canvas');if(!canvas)throw new Error('Không tạo được ảnh QR trên trình duyệt này.');
-    output.push({...entry,remark,filename:qrFilename(entry),png:canvas.toDataURL('image/png')});
+    if(typeof BIDVQRBrand==='undefined')throw new Error('Thiếu BIDV QR Renderer V1; tải lại trang.');
+    const png=await BIDVQRBrand.render(payload,{label:entry.student.name+' '+entry.student.className,amount:entry.remaining});
+    output.push({...entry,remark,filename:qrFilename(entry),png,qrEngineVersion:BIDVQREngine.version,qrRendererVersion:BIDVQRBrand.version});
   }
   renderQrCards(output);$('#qrSelectionCount').textContent=`${output.length} ảnh QR đã tạo`;
   $('#qrPreviewSummary').textContent=`${output.length} mã QR theo số dư còn thiếu (chưa đồng bộ lên cổng phụ huynh). Phải xác minh tài khoản và tiền còn thiếu trước khi công bố.`;
