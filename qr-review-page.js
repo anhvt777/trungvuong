@@ -11,7 +11,7 @@ async function reviewedQrPage(req,env){
 <button id="approve" disabled>4. Công bố QR đã kiểm tra (DEMO)</button><p id="status" role="status"></p>
 <script>
 (()=>{
-let items=[],current=null,checked=null;
+let items=[],current=null,checked=null,manifestVersion=null,rendererVersion=null;
 const e=id=>document.getElementById(id),reset=()=>{e('verified').checked=false;e('verified').disabled=true;e('approve').disabled=true;e('referenceConfirmed').checked=false;e('referenceWarning').hidden=true;checked=null};
 const SRC='https://anhvt777.github.io';
 if(window.opener){
@@ -47,6 +47,8 @@ e('file').addEventListener('change',async ev=>{
  try{
   const d=JSON.parse(await f.text());
   if(d.schema!=='bidvqrgen-parent-qr-manifest/1'||d.school_id!=='TRUNGVUONG'||d.status!=='UNVERIFIED_QR_DRAFT'||!Array.isArray(d.rows)||d.rows.length>200)throw Error('Sai mẫu danh mục QR Trưng Vương');
+  if(d.qr_engine_version!=='1.0.0'||d.qr_renderer_version!=='1.0.0')throw Error('File QR chưa sử dụng BIDV QR Engine/Renderer V1, hãy xuất lại trên bidvqrgen');
+  manifestVersion=d.qr_engine_version;rendererVersion=d.qr_renderer_version;
   items=d.rows;
   e('counter').textContent='Có '+items.length+' QR; '+(d.held?.length||0)+' dòng chưa hợp lệ, cần kiểm tra riêng.';
   e('choice').innerHTML='';
@@ -57,7 +59,7 @@ e('file').addEventListener('change',async ev=>{
 });
 e('choice').addEventListener('change',show);
 async function api(action){
- const r=await fetch('/api/admin/qr-review',{method:'POST',headers:{'Content-Type':'application/json','X-Portal-QR':'review-v1'},credentials:'same-origin',body:JSON.stringify({action,school_id:'TRUNGVUONG',schema:'bidvqrgen-parent-qr-manifest/1',row:current,charge_id:checked?.charge_id,confirm:action==='approve'?'I_VERIFIED_QR_WITH_BANK_APP':'',confirm_reference_mismatch:e('referenceConfirmed').checked?'I_VERIFIED_ACCOUNT_MAPPING':''})});
+ const r=await fetch('/api/admin/qr-review',{method:'POST',headers:{'Content-Type':'application/json','X-Portal-QR':'review-v1'},credentials:'same-origin',body:JSON.stringify({action,school_id:'TRUNGVUONG',schema:'bidvqrgen-parent-qr-manifest/1',qr_engine_version:manifestVersion,qr_renderer_version:rendererVersion,row:current,charge_id:checked?.charge_id,confirm:action==='approve'?'I_VERIFIED_QR_WITH_BANK_APP':'',confirm_reference_mismatch:e('referenceConfirmed').checked?'I_VERIFIED_ACCOUNT_MAPPING':''})});
  let d;try{d=await r.json()}catch{d={error:'Không đọc được phản hồi'}}return {ok:r.ok,data:d};
 }
 e('preview').addEventListener('click',async()=>{reset();e('preview').disabled=true;try{const r=await api('preview');e('result').textContent=JSON.stringify(r.data,null,2);if(r.ok&&r.data.status==='PREVIEW'){checked=r.data.info;e('verified').disabled=false;e('referenceWarning').hidden=!checked.reference_mismatch;e('status').textContent=checked.reference_mismatch?'Khác mã D1! Cần xác minh tài khoản BIDV và đánh dấu xác nhận liên kết trước khi duyệt.':'Đối chiếu D1 khớp. Hãy quét QR thật bằng app ngân hàng để xác minh.'}else e('status').textContent='QR chưa đủ điều kiện công bố.'}catch{e('status').textContent='Không kết nối được API. Chưa ghi D1.'}finally{e('preview').disabled=false}});
