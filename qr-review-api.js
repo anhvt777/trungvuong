@@ -11,6 +11,7 @@ async function reviewedQrApi(req,env){
  if(Number(req.headers.get('Content-Length')||0)>235000)return reply({error:'Too large'},413);
  let body;try{body=await req.json()}catch{return reply({error:'Invalid JSON'},400)}
  const x=body?.row;
+ if(body.qr_engine_version!=='1.0.0'||body.qr_renderer_version!=='1.0.0')return reply({error:'QR_ENGINE_VERSION_REQUIRED',expected:'1.0.0'},422);
  if(!x||!['preview','approve'].includes(body.action)||body.schema!=='bidvqrgen-parent-qr-manifest/1'||body.school_id!=='TRUNGVUONG')return reply({error:'Invalid manifest'},400);
  for(const k of ['student_name','class_name','charge_name','account_name','remark','bank_bin','account_number','qr_payload','qr_png_base64'])if(typeof x[k]!=='string')return reply({error:'Missing '+k},400);
  if([x.student_name,x.class_name,x.charge_name,x.account_name].some(v=>!v.trim()||v.length>120))return reply({error:'Invalid identity or charge'},422);
@@ -51,7 +52,7 @@ async function reviewedQrApi(req,env){
  if(body.confirm!=='I_VERIFIED_QR_WITH_BANK_APP'||body.charge_id!==c.id)return reply({error:'Missing verification confirmation'},403);
  if(referenceMismatch&&body.confirm_reference_mismatch!=='I_VERIFIED_ACCOUNT_MAPPING')return reply({status:'HELD',reason:'ACCOUNT_REFERENCE_MISMATCH_CONFIRMATION_REQUIRED',info},409);
  const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(x.qr_payload)))).map(v=>v.toString(16).padStart(2,'0')).join('').slice(0,24);
- const update=env.DB.prepare("UPDATE charges SET payment_account=?,qr_png_base64=?,qr_amount=?,qr_verified=1,qr_source=?,revision=revision+1 WHERE id=? AND published=1 AND (payment_account IS NULL OR payment_account=?) AND amount_due-COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE pa.charge_id=charges.id AND p.status='confirmed'),0)=?").bind(x.account_number,x.qr_png_base64,x.amount,'DEMO_ONLY',c.id,x.account_number,x.amount);
+ const update=env.DB.prepare("UPDATE charges SET payment_account=?,qr_png_base64=?,qr_amount=?,qr_verified=1,qr_source=?,qr_payee_name=?,qr_remark=?,qr_engine_version=?,qr_renderer_version=?,revision=revision+1 WHERE id=? AND published=1 AND (payment_account IS NULL OR payment_account=?) AND amount_due-COALESCE((SELECT SUM(pa.amount) FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id WHERE pa.charge_id=charges.id AND p.status='confirmed'),0)=?").bind(x.account_number,x.qr_png_base64,x.amount,'DEMO_ONLY',x.account_name,x.remark,body.qr_engine_version,body.qr_renderer_version,c.id,x.account_number,x.amount);
  const audit=env.DB.prepare("INSERT INTO audit_events(id,school_id,event_type,target_id,created_at) VALUES(?,?,?,?,?)").bind(crypto.randomUUID(),'TRUNGVUONG','DEMO_QR_APPROVED:'+email+':'+fingerprint,c.id,new Date().toISOString());
  let result;try{result=await env.DB.batch([update,audit])}catch{return reply({error:'D1 QR verification failed'},503)}
  if(!result?.[0]?.meta?.changes)return reply({status:'NEEDS_REVIEW',info},409);
