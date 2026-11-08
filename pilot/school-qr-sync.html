@@ -45,6 +45,7 @@ function items(s){return Array.isArray(s.dueItems)?s.dueItems.filter(x=>Number(x
 function findMatch(row,students){
  const pool=[];for(const s of students){if(s.status==='inactive')continue;
   if(norm(s.name)!==norm(row.student_name)||norm(s.className)!==norm(row.class_name))continue;
+  if(row.student_id&&key(s.code)!==key(row.student_id)&&key(s.externalCode)!==key(row.student_id))continue;
   for(const item of items(s)){
     if(Number(item.amount)!==Number(row.amount))continue;
     if(item.qrAccountNumber&&key(item.qrAccountNumber)!==key(row.account_number))continue;
@@ -96,10 +97,10 @@ e('approve').onclick=async()=>{
  e('export').disabled=false;e('connect').disabled=false;
  e('status').textContent='Đã ghi nhận danh mục '+approved.rows.length+' QR tại trường, SHA-256: '+hash.slice(0,16)+'… Chưa công bố Cloudflare.';
 };
-e('export').onclick=()=>{if(!approved)return;const u=URL.createObjectURL(new Blob([JSON.stringify(approved,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='TRUNGVUONG_SCHOOL_APPROVED_QR.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);};
+e('export').onclick=()=>{if(!approved)return;const u=URL.createObjectURL(new Blob([JSON.stringify({...approved,status:'UNVERIFIED_QR_DRAFT'},null,2)],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='TRUNGVUONG_SCHOOL_APPROVED_QR_PORTAL_IMPORT.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);};
 e('connect').onclick=()=>{
  if(!approved)return;const target='https://school-parent-dev.tuananh0001.workers.dev';const popup=window.open(target+'/admin/qr-review','schoolParentQrReview');if(!popup){e('status').textContent='Trình duyệt chặn cửa sổ Cloudflare';return;}
- const listener=ev=>{if(ev.origin!==target||ev.source!==popup||ev.data?.type!=='BIDV_QR_PORTAL_READY'||!/^[a-f0-9]{40}$/.test(ev.data.challenge||''))return;window.removeEventListener('message',listener);popup.postMessage({type:'BIDV_QR_PORTAL_DRAFT',challenge:ev.data.challenge,manifest:approved},target);e('status').textContent='Đã gửi bản danh mục QR đã đối chiếu sang trang quản trị Cloudflare. Cần hoàn tất công bố trên trang quản trị.';};
+ const listener=ev=>{if(ev.origin!==target||ev.source!==popup||ev.data?.type!=='BIDV_QR_PORTAL_READY'||!/^[a-f0-9]{40}$/.test(ev.data.challenge||''))return;window.removeEventListener('message',listener);popup.postMessage({type:'BIDV_QR_PORTAL_DRAFT',challenge:ev.data.challenge,manifest:{...approved,status:'UNVERIFIED_QR_DRAFT',source:'trungvuong-school-approved'}},target);e('status').textContent='Đã chuyển QR đã đối chiếu sang Cloudflare ở định dạng tương thích. Cần kiểm tra kỹ thuật và xác nhận công bố trên trang quản trị.';};
  window.addEventListener('message',listener);popup.postMessage({type:'BIDV_QR_PORTAL_HELLO'},target);e('status').textContent='Đang mở Cloudflare Access và chuyển danh mục sau khi xác thực.';
 };
 })();
