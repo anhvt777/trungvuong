@@ -1,0 +1,45 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trưng Vương • QR Engine → Cổng phụ huynh</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#f0f6f4;font:15px system-ui,Arial;color:#174740}header{background:#006052;color:#fff;padding:20px max(18px,calc((100% - 1000px)/2))}header h1{font-size:21px;margin:0 0 8px}header p{margin:0;opacity:.85}main{max-width:1000px;margin:22px auto;padding:0 15px;display:grid;grid-template-columns:1fr 1fr;gap:18px}section{background:white;border:1px solid #d7e6df;border-radius:16px;padding:22px}h2{font-size:19px;margin-top:0}label{display:block;font-weight:600;margin:13px 0 5px}input{width:100%;padding:11px;border:1px solid #bdcfc8;border-radius:9px;font:inherit}button,a.action{background:#087463;color:white;border:0;border-radius:9px;padding:11px 15px;cursor:pointer;font:inherit;text-decoration:none;display:inline-block;margin:8px 5px 2px 0}button.secondary,a.secondary{background:#e5f0ed;color:#066351}button:disabled{opacity:.45;cursor:not-allowed}#image{width:100%;max-width:360px;margin:10px auto;display:block}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#f2f6f4;border-radius:7px;padding:10px;max-height:210px;overflow:auto}.warn{background:#fff4dc;border:1px solid #ead6a3;padding:11px;border-radius:8px;font-size:13px}.small{font-size:12px;color:#547469}.status{min-height:30px;font-weight:600}#status{color:#a43b21}#status.ok{color:#086a4f}@media(max-width:760px){main{grid-template-columns:1fr}} </style></head>
+<body><header><h1>Trưng Vương · QR Engine → Cổng phụ huynh</h1><p>Chế độ thử nghiệm tách biệt. Mã hóa ngay trên thiết bị, không gọi API VietQR, không tự ghi dữ liệu lên cổng.</p></header>
+<main><section><h2>01 · Khai báo một món thu</h2><div class="warn"><strong>Chỉ sử dụng dữ liệu giả lập Trưng Vương.</strong> Các trường học sinh, lớp, món và kỳ thu phải tương ứng chính xác với dữ liệu DEMO đã có ở cổng phụ huynh. Không nhập dữ liệu học sinh thật vào môi trường này.</div>
+<label for="student">Tên học sinh demo trong D1</label><input id="student" placeholder="Nhập tên đúng theo danh sách thử nghiệm" autocomplete="off">
+<label for="className">Lớp</label><input id="className" placeholder="Ví dụ: 6A1" autocomplete="off">
+<label for="charge">Tên khoản thu</label><input id="charge" placeholder="BHYT / BHTT / Bán trú" autocomplete="off">
+<label for="bankBin">BIN ngân hàng</label><input id="bankBin" value="970418" inputmode="numeric" maxlength="6">
+<label for="account">Tài khoản định danh BIDV đã xác minh</label><input id="account" placeholder="Tài khoản được cấp cho đúng món" maxlength="19" autocomplete="off">
+<label for="accountName">Tên thụ hưởng</label><input id="accountName" placeholder="Tên tài khoản ngân hàng" autocomplete="off">
+<label for="amount">Số tiền còn thiếu (VND)</label><input id="amount" inputmode="numeric" placeholder="683100">
+<label for="remark">Nội dung chuyển khoản (tối đa 25 ký tự)</label><input id="remark" placeholder="Mã khoản thu / kỳ thu" maxlength="25">
+<button id="make">Tạo & tự kiểm tra QR</button><button class="secondary" id="export" disabled>Xuất danh mục JSON để duyệt</button><div class="status" id="status"></div>
+<p class="small">Danh mục được tải xuống máy. Chỉ khi người quản trị chủ động tải lên trang duyệt riêng của cổng phụ huynh thì dữ liệu mới được gửi đến Cloudflare D1.</p>
+</section><section><h2>02 · Kiểm tra và duyệt trên cổng</h2><img id="image" alt="QR sẽ hiển thị sau khi tạo" hidden><pre id="details">Chưa tạo QR</pre>
+<div class="warn">Quy trình: (1) Tạo QR; (2) quét bằng ứng dụng ngân hàng và xác minh tên thụ hưởng, số tiền, nội dung; (3) tải JSON; (4) mở trang quản trị QR và tải file; (5) đối chiếu D1; (6) người có quyền duyệt. Không có thao tác tự duyệt.</div>
+<a class="action" target="_blank" rel="noopener noreferrer" href="https://school-parent-dev.tuananh0001.workers.dev/admin/qr-review">Mở trang duyệt QR trên cổng phụ huynh</a>
+<a class="secondary action" target="_blank" rel="noopener noreferrer" href="https://school-parent-dev.tuananh0001.workers.dev/admin/qr-status">Xem trạng thái QR đã công bố</a>
+<p class="small">Phiên bản QR Engine v1.0.0 – bộ dựng QR tiêu chuẩn, không chèn logo. Giữ nguyên cơ chế kiểm tra Access, D1, số tiền còn thiếu và xác nhận thủ công trong cổng phụ huynh.</p></section></main>
+<script src="../sdk/qr-encoder.js"></script><script src="../sdk/qr-pay-core.js"></script><script src="../sdk/qr-renderer.js"></script>
+<script>
+'use strict';(()=>{const $=id=>document.getElementById(id);let approvedDraft=null;
+const fld=(tag,v)=>{v=String(v);if(v.length>99)throw Error('Trường '+tag+' quá dài');return tag+String(v.length).padStart(2,'0')+v};
+function normalize(v){return String(v??'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toUpperCase().replace(/[^A-Z0-9 _.-]/g,' ').replace(/\s+/g,' ').trim()}
+function compatiblePayload(x){
+ const p=QRPay.generate({bin:x.bank_bin,account:x.account_number,amount:String(x.amount),note:x.remark});
+ const marker='5802VN';if(!p.includes(marker)||!p.endsWith('6304'+QRPay.crc16(p.slice(0,-4))))throw Error('QR Core tạo payload không hợp lệ');
+ const additions=fld('59',normalize(x.account_name).slice(0,25))+fld('60','VIETNAM');
+ const base=p.slice(0,-4).replace(marker,marker+additions);
+ const result=base+QRPay.crc16(base),decoded=QRPay.decode(result);
+ if(!decoded.valid||decoded.bin!==x.bank_bin||decoded.account!==x.account_number||decoded.amount!==String(x.amount)||decoded.note!==x.remark||decoded.service!=='QRIBFTTA'||decoded.guid!=='A000000727')throw Error('QR đối chiếu payload không khớp');
+ return result;
+}
+function getInput(){const val=id=>$(id).value.trim();const x={student_name:val('student'),class_name:val('className'),charge_name:val('charge'),bank_bin:val('bankBin'),account_number:val('account'),account_name:val('accountName'),remark:val('remark'),amount:Number(val('amount'))};
+ if([x.student_name,x.class_name,x.charge_name,x.account_name].some(v=>!v||v.length>80))throw Error('Thiếu hoặc sai thông tin học sinh demo, lớp, khoản thu, chủ tài khoản');
+ if(x.bank_bin!=='970418')throw Error('Pilot này chỉ kiểm thử BIDV – BIN 970418');
+ if(!/^[0-9A-Za-z]{4,19}$/.test(x.account_number))throw Error('Tài khoản phải có 4–19 chữ/số; cần tài khoản đã được BIDV cấp');
+ if(!Number.isSafeInteger(x.amount)||x.amount<1||x.amount>10000000||!/^\d+$/.test(val('amount')))throw Error('Số tiền phải là số nguyên 1–10.000.000đ, không có dấu phân cách');
+ if(!x.remark||x.remark.length>25||! /^[A-Za-z0-9 _.-]+$/.test(x.remark))throw Error('Nội dung không dấu, 1–25 ký tự, chỉ gồm chữ/số, khoảng trắng, dấu _.-');
+ return x;}
+async function renderPng(svg){return new Promise((resolve,reject)=>{const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'})),im=new Image();im.onload=()=>{try{const canvas=document.createElement('canvas');canvas.width=canvas.height=512;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,512,512);ctx.drawImage(im,0,0,512,512);const png=canvas.toDataURL('image/png');URL.revokeObjectURL(url);resolve(png)}catch(e){URL.revokeObjectURL(url);reject(e)}};im.onerror=()=>{URL.revokeObjectURL(url);reject(Error('Không thể vẽ QR thành PNG'))};im.src=url;})}
+$('make').onclick=async()=>{approvedDraft=null;$('export').disabled=true;$('status').className='status';$('image').hidden=true;try{const row=getInput();row.qr_payload=compatiblePayload(row);const svg=renderSVG(row.qr_payload,{style:'standard',size:512});const png=await renderPng(svg);row.qr_png_base64=png.split(',')[1];if(row.qr_png_base64.length>=175000)throw Error('PNG quá lớn cho cổng phụ huynh');const decoded=QRPay.decode(row.qr_payload);const top=decoded.fields.filter(x=>['59','60'].includes(x.tag));if(top.length!==2||top[0].value!==normalize(row.account_name).slice(0,25)||top[1].value!=='VIETNAM')throw Error('Trường thụ hưởng không khớp');approvedDraft={schema:'bidvqrgen-parent-qr-manifest/1',school_id:'TRUNGVUONG',status:'UNVERIFIED_QR_DRAFT',qr_engine_version:'1.0.0',qr_renderer_version:'1.0.0',rows:[row],held:[]};$('image').src=png;$('image').hidden=false;$('details').textContent=JSON.stringify({engine:'BIDV QR Engine 1.0.0',bin:row.bank_bin,account:row.account_number,amount:row.amount,note:row.remark,crc:decoded.provided,validCRC:decoded.valid,px:512,review:'CẦN PHÊ DUYỆT TRÊN CỔNG',payload:row.qr_payload},null,2);$('status').textContent='QR hợp lệ theo thuật toán. Chưa kiểm tra ngân hàng và chưa duyệt D1.';$('status').className='status ok';$('export').disabled=false;}catch(e){$('status').textContent='Không xuất QR: '+e.message;$('details').textContent='Chưa có QR hợp lệ'}};
+$('export').onclick=()=>{if(!approvedDraft)return;const blob=new Blob([JSON.stringify(approvedDraft,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='TRUNGVUONG_QR_INDEPENDENT_DRAFT.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+})();
+</script></body></html>
